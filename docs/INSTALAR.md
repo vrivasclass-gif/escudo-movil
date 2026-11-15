@@ -23,6 +23,16 @@ Obtainium es una app libre que instala apps directamente desde GitHub y te avisa
    - **Que Android no cierre Escudo** (quita la optimización de batería).
    - **Borrar el ID de publicidad**.
 
+6. **Algoritmo → Plan anti-algoritmo**: sigue los pasos para Instagram (o la app que quieras).
+
+## Optimizar con Shizuku (opcional, sin root)
+Shizuku es una app gratuita que da a Escudo permisos de "depuración" para desactivar bloatware, quitar permisos ocultos, acelerar animaciones y poner la pantalla en grises.
+1. Instala **Shizuku** desde Google Play o https://github.com/RikkaApps/Shizuku/releases
+2. Activa las **Opciones de desarrollador**: Ajustes → Información del teléfono → toca 7 veces "Número de compilación".
+3. Abre Shizuku → **Iniciar mediante depuración inalámbrica** y sigue sus pasos (emparejar con el código que aparece en Ajustes → Opciones de desarrollador → Depuración inalámbrica).
+4. En Escudo → **Optimizar** → **Dar permiso a Escudo** y después **Conceder con Shizuku** (permiso permanente).
+5. Tras reiniciar el móvil hay que volver a iniciar Shizuku, pero la escala de grises y las animaciones siguen funcionando sin él.
+
 ### Para los móviles Xiaomi, Huawei, Oppo, Realme, Vivo y Samsung
 Estos fabricantes cierran apps en segundo plano de forma agresiva. Además del paso de batería:
 - Xiaomi: Ajustes → Apps → Escudo → Ahorro de batería → **Sin restricciones**, y activa **Inicio automático**.

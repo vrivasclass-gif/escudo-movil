@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Versión a publicar en Releases (ej. 0.2.0). Vacío = solo compilar."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -35,9 +40,15 @@ jobs:
           fi
 
       - name: Versión
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             echo "VERSION_NAME=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+            echo "RELEASE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+          elif [ -n "$INPUT_VERSION" ]; then
+            echo "VERSION_NAME=v${INPUT_VERSION#v}" >> "$GITHUB_ENV"
+            echo "RELEASE_TAG=v${INPUT_VERSION#v}" >> "$GITHUB_ENV"
           else
             echo "VERSION_NAME=0.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
           fi
@@ -58,8 +69,11 @@ jobs:
           path: Escudo-*.apk
 
       - name: Publicar versión
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: env.RELEASE_TAG != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Escudo ${{ env.RELEASE_TAG }}
           files: Escudo-*.apk
           generate_release_notes: true

@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         ListUpdateWorker.schedule(this)
+        app.escudo.vpn.GrayscaleWorker.schedule(this)
         setContent { EscudoTheme { EscudoApp() } }
     }
 }
@@ -70,7 +71,8 @@ class MainActivity : ComponentActivity() {
 private enum class Tab(val label: String, val icon: Int) {
     HOME("Inicio", R.drawable.ic_shield),
     NET("Red", R.drawable.ic_net),
-    SHIELD("Escudo", R.drawable.ic_eye),
+    SHIELD("Algoritmo", R.drawable.ic_eye),
+    OPTIMIZE("Optimizar", R.drawable.ic_tune),
     APPS("Apps", R.drawable.ic_apps),
 }
 
@@ -84,7 +86,7 @@ private fun EscudoApp() {
                     NavigationBarItem(
                         selected = tab == i, onClick = { tab = i },
                         icon = { Icon(painterResource(t.icon), contentDescription = null) },
-                        label = { Text(t.label) },
+                        label = { Text(t.label, maxLines = 1) },
                     )
                 }
             }
@@ -95,6 +97,7 @@ private fun EscudoApp() {
                 Tab.HOME -> HomeScreen()
                 Tab.NET -> NetScreen()
                 Tab.SHIELD -> ShieldScreen()
+                Tab.OPTIMIZE -> OptimizeScreen()
                 Tab.APPS -> AuditScreen()
             }
         }
@@ -142,7 +145,35 @@ private fun HomeScreen() {
             )
         }
         item {
-            Section("Cortafuegos anti-rastreo", status) {
+            Section(
+                "Cómo te protege Escudo",
+                "Tres capas que trabajan dentro de tu móvil",
+            ) {
+                Text(
+                    "1. Red: corta las conexiones de rastreo y publicidad de todas las apps antes de que salgan del móvil.\n" +
+                        "2. Algoritmo: le quita datos a las redes sociales y te ayuda a usarlas cuando tú decides.\n" +
+                        "3. Optimizar: desactiva apps de fábrica, frena el segundo plano y acelera las animaciones.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Explain(
+                    "Las redes sociales ganan dinero con tu atención. Para captarla necesitan dos cosas: saber mucho de ti " +
+                        "(datos) y poder llamarte cuando más les conviene (notificaciones, feeds sin fin, colores llamativos). " +
+                        "Escudo trabaja sobre las dos: reduce los datos que salen de tu móvil y añade consciencia y fricción " +
+                        "donde las apps están diseñadas para quitártelas.\n\nTodo ocurre en tu teléfono. Escudo no tiene " +
+                        "servidores, no tiene cuenta y no envía nada a nadie. Su código es público.",
+                    label = "¿Por qué funciona?",
+                )
+            }
+        }
+        item {
+            Section(
+                "Cortafuegos anti-rastreo", status,
+                explain = "Cada vez que una app quiere conectarse a un servidor, primero pregunta su dirección (consulta DNS). " +
+                    "Escudo responde a esas preguntas dentro del móvil: si el servidor es de rastreo o publicidad, contesta " +
+                    "\"no existe\" y la conexión nunca se produce, así que tus datos no salen.\n\nAndroid lo muestra como una " +
+                    "\"VPN\" (verás una llave 🔑), pero tu tráfico NO va a ningún servidor externo: solo pasan por Escudo las " +
+                    "preguntas DNS; el resto va directo. Por eso no pierdes velocidad, y además ahorras datos y batería.",
+            ) {
                 SwitchRow(
                     "Bloquear rastreadores y publicidad",
                     "Filtra en el propio móvil. Tu tráfico no pasa por ningún servidor.",
@@ -167,8 +198,12 @@ private fun HomeScreen() {
             key(tick / 3) {
                 val connected = ShieldState.connected
                 Section(
-                    "Escudo anti-algoritmo",
-                    if (connected) "Activo · ${prefs.feedsBlockedCount} feeds bloqueados" else "Desactivado",
+                    "Avisos y pausas (accesibilidad)",
+                    if (connected) "Activo · ${prefs.feedsBlockedCount} avisos mostrados" else "Desactivado",
+                    explain = "Para avisarte cuando entras en Reels o Shorts, mostrar la pausa consciente y contar tu tiempo, " +
+                        "Escudo necesita saber qué pantalla tienes delante. Android solo lo permite mediante el servicio de " +
+                        "accesibilidad. Escudo lo usa únicamente para eso: no lee lo que escribes, no hace capturas y no se " +
+                        "conecta a internet. El plan completo está en la pestaña Algoritmo.",
                 ) {
                     if (!connected) {
                         Text(
@@ -181,7 +216,7 @@ private fun HomeScreen() {
                             TextButton(onClick = { openAppDetails(ctx, ctx.packageName) }) { Text("Info de la app") }
                         }
                     } else {
-                        Text("Funcionando. Configúralo en la pestaña Escudo.", style = MaterialTheme.typography.bodySmall)
+                        Text("Funcionando. Sigue el plan en la pestaña Algoritmo.", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -194,7 +229,11 @@ private fun HomeScreen() {
 @Composable
 private fun SystemTips() {
     val ctx = LocalContext.current
-    Section("Ajustes recomendados del móvil", "Un toque te lleva al sitio exacto") {
+    Section(
+        "Ajustes recomendados del móvil", "Un toque te lleva al sitio exacto",
+        explain = "Hay ajustes que ninguna app puede cambiar por ti sin permisos especiales. Escudo te lleva directo a cada " +
+            "pantalla y te dice qué tocar. Los que necesitan Shizuku están en la pestaña Optimizar.",
+    ) {
         Tip("VPN siempre activa", "Ajustes > VPN > Escudo (⚙) > activa \"VPN siempre activa\". Así nunca se queda sin protección.") {
             open(ctx, Intent(Settings.ACTION_VPN_SETTINGS))
         }

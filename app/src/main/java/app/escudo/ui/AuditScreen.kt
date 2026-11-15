@@ -52,6 +52,11 @@ fun AuditScreen() {
             Section(
                 "Auditor de privacidad",
                 "Busca SDKs de rastreo y publicidad dentro de tus apps y los permisos sensibles que tienen concedidos. Sin internet.",
+                explain = "Un SDK es un trozo de código de otra empresa que el desarrollador mete en su app, a menudo a " +
+                    "cambio de dinero o de estadísticas gratis. Si una app de linterna lleva el SDK de Facebook y el de " +
+                    "AppsFlyer, esas empresas reciben datos tuyos aunque nunca hayas abierto Facebook.\n\nEscudo los detecta " +
+                    "leyendo los componentes que cada app declara al sistema, sin abrirla ni conectarse a internet. Puede " +
+                    "haber rastreadores que no detecte: es una pista, no un análisis forense.",
             ) {
                 SwitchRow("Incluir apps del sistema", "Útil para ver la telemetría del fabricante.", includeSystem) { includeSystem = it }
                 TextButton(enabled = !loading, onClick = { scan() }) { Text(if (loading) "Analizando…" else "Analizar mis apps") }
@@ -77,6 +82,8 @@ fun AuditScreen() {
 private fun ReportCard(r: AppReport) {
     val ctx = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
+    var harden by remember { mutableStateOf(false) }
+    if (harden) HardeningDialog(r.pkg, r.label) { harden = false }
     Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clickable { expanded = !expanded }) {
         Column(Modifier.padding(14.dp)) {
             Row {
@@ -100,7 +107,10 @@ private fun ReportCard(r: AppReport) {
                     Text("Permisos concedidos:", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
                     Text(r.sensitivePerms.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
                 }
-                TextButton(onClick = { openAppDetails(ctx, r.pkg) }) { Text("Abrir ajustes de la app") }
+                Row {
+                    TextButton(onClick = { openAppDetails(ctx, r.pkg) }) { Text("Ajustes de la app") }
+                    TextButton(onClick = { harden = true }) { Text("Quitarle datos (Shizuku)") }
+                }
             }
         }
     }

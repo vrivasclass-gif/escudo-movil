@@ -62,8 +62,9 @@ class Prefs(context: Context) {
 
     // ---------- Escudo anti-algoritmo ----------
     var feedRulesText: String
-        get() = p.getString("feed_rules", FeedRules.DEFAULT_TEXT) ?: FeedRules.DEFAULT_TEXT
-        set(v) = p.edit().putString("feed_rules", v).apply()
+        // v2: las reglas de la 0.1 expulsaban y una de ellas (clips_tab) cerraba Instagram sin parar
+        get() = p.getString("feed_rules_v2", FeedRules.DEFAULT_TEXT) ?: FeedRules.DEFAULT_TEXT
+        set(v) = p.edit().putString("feed_rules_v2", v).apply()
 
     var shieldEnabled: Boolean
         get() = p.getBoolean("shield_on", true)
@@ -88,6 +89,31 @@ class Prefs(context: Context) {
     var feedsBlockedCount: Long
         get() = p.getLong("feeds_blocked", 0)
         set(v) = p.edit().putLong("feeds_blocked", v).apply()
+
+    // ---------- Optimización (Shizuku) ----------
+    var grayscaleScheduled: Boolean
+        get() = p.getBoolean("gray_sched", false)
+        set(v) = p.edit().putBoolean("gray_sched", v).apply()
+
+    var grayscaleStart: Int
+        get() = p.getInt("gray_start", 22)
+        set(v) = p.edit().putInt("gray_start", v).apply()
+
+    var grayscaleEnd: Int
+        get() = p.getInt("gray_end", 8)
+        set(v) = p.edit().putInt("gray_end", v).apply()
+
+    /** Acciones aplicadas con Shizuku: "descripción<TAB>comando para deshacer", una por línea. */
+    var appliedActions: List<Pair<String, String>>
+        get() = (p.getString("applied", "") ?: "").lineSequence().mapNotNull {
+            val i = it.indexOf('\t'); if (i <= 0) null else it.substring(0, i) to it.substring(i + 1)
+        }.toList()
+        set(v) = p.edit().putString("applied", v.joinToString("\n") { "${it.first}\t${it.second}" }).apply()
+
+    // ---------- Plan anti-algoritmo ----------
+    var planDone: Set<String>
+        get() = p.getStringSet("plan_done", emptySet()) ?: emptySet()
+        set(v) = p.edit().putStringSet("plan_done", v).apply()
 
     // ---------- Uso diario (lo escribe el escudo) ----------
     fun usageToday(pkg: String): Long = p.getLong(usageKey(pkg), 0)
@@ -148,7 +174,9 @@ object Blocklists {
         Blocklist("hagezi_huawei", "Telemetría Huawei", "Rastreo del sistema en Huawei/Honor.", H + "native.huawei.txt"),
         Blocklist("hagezi_oppo", "Telemetría Oppo/Realme/OnePlus", "Rastreo del sistema en Oppo, Realme y OnePlus.", H + "native.oppo-realme.txt"),
         Blocklist("hagezi_vivo", "Telemetría Vivo", "Rastreo del sistema en Vivo/iQOO.", H + "native.vivo.txt"),
+        Blocklist("meta_sdk", "Meta en otras apps", "Corta el SDK de Facebook que otras apps usan para contarle a Meta lo que haces en ellas. Rompe \"Iniciar sesión con Facebook\" en apps de terceros.", "asset:meta_sdk.txt"),
         Blocklist("stevenblack", "StevenBlack hosts", "Lista clásica de publicidad y malware.", "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"),
     )
     val DEFAULT_ENABLED = setOf("hagezi_pro", "hagezi_tiktok")
+    fun isBuiltIn(b: Blocklist) = b.url.startsWith("asset:")
 }

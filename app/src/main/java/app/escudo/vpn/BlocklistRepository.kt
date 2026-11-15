@@ -33,6 +33,9 @@ class BlocklistRepository(private val context: Context) {
         var total = 0
         context.assets.open("base_blocklist.txt").bufferedReader().useLines { total += ListParser.parseInto(it, b) }
         val ids = prefs.enabledLists + customUrls().map(::customId)
+        for (bl in Blocklists.ALL.filter { it.id in ids && Blocklists.isBuiltIn(it) }) {
+            context.assets.open(bl.url.removePrefix("asset:")).bufferedReader().useLines { total += ListParser.parseInto(it, b) }
+        }
         for (id in ids) {
             val f = fileFor(id)
             if (f.exists()) f.bufferedReader().useLines { total += ListParser.parseInto(it, b) }
@@ -50,7 +53,7 @@ class BlocklistRepository(private val context: Context) {
      * Se escribe a un archivo temporal y solo se sustituye si la descarga es válida.
      */
     fun updateAll(): String {
-        val targets = Blocklists.ALL.filter { it.id in prefs.enabledLists }.map { it.id to it.url } +
+        val targets = Blocklists.ALL.filter { it.id in prefs.enabledLists && !Blocklists.isBuiltIn(it) }.map { it.id to it.url } +
             customUrls().map { customId(it) to it }
         var ok = 0
         val errors = mutableListOf<String>()

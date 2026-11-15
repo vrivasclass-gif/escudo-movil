@@ -14,19 +14,26 @@ Funciona **100 % en tu teléfono**: sin cuentas, sin servidores propios, sin pub
 - **Registro en vivo**: ves qué app intenta contactar con qué rastreador, y lo bloqueas o permites con un toque.
 - Servidor DNS a elegir: Quad9 (por defecto), Cloudflare, AdGuard o Mullvad.
 
-### 2. Escudo anti-algoritmo
-- Te saca automáticamente de los **feeds infinitos**: Reels de Instagram y Facebook, Shorts de YouTube, Spotlight de Snapchat y, si quieres, TikTok entero.
-- **Pausa consciente**: una cuenta atrás antes de abrir las apps que elijas, para que abrirlas sea una decisión y no un impulso.
-- **Límites diarios** por app: al llegar al límite, la app se cierra hasta mañana.
-- **Panel de uso** diario y semanal.
-- Las reglas son texto editable: si una red social cambia su diseño, se arregla desde la propia app.
+### 2. Algoritmo: que sepa menos de ti y te enganche menos
+La idea no es prohibirte las redes sociales, sino que dejen de ser tan eficaces controlando tu atención.
+- **Plan anti-algoritmo** paso a paso para Instagram, TikTok, YouTube, Facebook y X. Cada paso explica por qué funciona: quitarle datos del móvil, apagar notificaciones, cortar el rastreo de Meta en otras apps, usar el feed cronológico, reiniciar lo que sabe de ti…
+- **Avisos en vídeos cortos**: al entrar en Reels o Shorts te recuerda dónde estás, sin cerrarte la app (como mucho un aviso cada 3 minutos).
+- **Pausa consciente**: una cuenta atrás antes de abrir las apps que elijas.
+- **Límites diarios** opcionales y **panel de uso** diario y semanal.
 
 ### 3. Auditor de privacidad
 - Detecta más de 50 SDKs de rastreo y publicidad dentro de tus apps (AppsFlyer, Meta, AdMob, Adjust…) y los permisos sensibles que tienen concedidos.
 - Un toque te lleva a los ajustes de cada app para quitárselos.
 
-### 4. Ajustes del sistema recomendados
-Accesos directos para: VPN siempre activa, borrar el ID de publicidad, DNS privado, animaciones a 0,5x (más fluidez) y quitar la optimización de batería a Escudo.
+### 4. Optimizar (con Shizuku, sin root)
+- **Bloatware**: desactiva apps de fábrica que recogen datos o ponen anuncios (Facebook preinstalado, analytics de Xiaomi, Samsung Free…). Reversible.
+- **Permisos ocultos**: quita a cualquier app ubicación, contactos, portapapeles, escaneo Wi-Fi/Bluetooth y el permiso de funcionar en segundo plano, con una explicación de cada uno.
+- **Fluidez**: animaciones a 0,5x.
+- **Escala de grises** ahora o por horario.
+- **Historial con deshacer** para cada cambio.
+
+### 5. Explicado en cada paso
+Cada sección tiene un "¿Qué hace esto y por qué?" y el registro explica qué empresa hay detrás de cada dominio bloqueado y para qué lo usa.
 
 ## Instalación
 Lee la [guía de instalación](docs/INSTALAR.md). En resumen: descarga el APK de [Releases](../../releases) o, mejor, instálalo con **Obtainium** para recibir las actualizaciones automáticamente.
@@ -38,11 +45,10 @@ Android no permite a una app normal (sin root) modificar otras apps ni el sistem
 - La detección de Reels/Shorts depende del diseño interno de cada app; si cambia, se ajusta en *Escudo > Reglas de feeds*.
 
 ## Hoja de ruta
-- Módulo Shizuku (sin root): desactivar bloatware, congelar apps en segundo plano, escala de grises programada, revocar permisos ocultos.
 - Exportar/importar configuración.
 
 ## Compilar
-Cada cambio en `main` se compila solo en GitHub Actions. Para publicar una versión: crea una etiqueta `vX.Y.Z` y Actions sube el APK firmado a Releases.
+Cada cambio en `main` se compila solo en GitHub Actions. Para publicar una versión: pestaña **Actions → Compilar APK → Run workflow**, escribe la versión (p. ej. `0.2.0`) y pulsa **Run**. Actions sube el APK firmado a Releases y Obtainium lo instala. (También vale crear una etiqueta `vX.Y.Z`.)
 
 ```bash
 ./gradlew assembleRelease   # requiere Android SDK

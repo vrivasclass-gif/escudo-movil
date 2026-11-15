@@ -59,5 +59,24 @@ class BootReceiver : BroadcastReceiver() {
             try { EscudoVpnService.start(context) } catch (_: Exception) {}
         }
         ListUpdateWorker.schedule(context)
+        GrayscaleWorker.schedule(context)
+        app.escudo.optimize.Optimizer.applyGraySchedule(context)
+    }
+}
+
+/** Comprueba cada 15 minutos el horario de escala de grises (por si el servicio de accesibilidad está apagado). */
+class GrayscaleWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
+    override suspend fun doWork(): Result {
+        app.escudo.optimize.Optimizer.applyGraySchedule(applicationContext)
+        return Result.success()
+    }
+
+    companion object {
+        fun schedule(ctx: Context) {
+            WorkManager.getInstance(ctx).enqueueUniquePeriodicWork(
+                "grayscale", ExistingPeriodicWorkPolicy.KEEP,
+                PeriodicWorkRequestBuilder<GrayscaleWorker>(15, TimeUnit.MINUTES).build(),
+            )
+        }
     }
 }

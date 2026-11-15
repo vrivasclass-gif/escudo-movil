@@ -11,7 +11,9 @@ import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
+import app.escudo.core.FeedAction
 import app.escudo.core.FeedRule
+import app.escudo.optimize.Optimizer
 import app.escudo.core.FeedRules
 import app.escudo.data.Prefs
 
@@ -36,6 +38,7 @@ class FeedShieldService : AccessibilityService() {
     private var screenOn = true
     private var lastScan = 0L
     private var lastAction = 0L
+    private val lastNotice = HashMap<String, Long>()
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
@@ -51,6 +54,7 @@ class FeedShieldService : AccessibilityService() {
         override fun run() {
             flushUsage()
             foregroundPkg?.let { enforceLimit(it) }
+            Optimizer.applyGraySchedule(this@FeedShieldService)
             main.postDelayed(this, 30_000)
         }
     }
@@ -93,9 +97,21 @@ class FeedShieldService : AccessibilityService() {
         val root = rootInActiveWindow ?: return
         val hit = pkgRules.firstOrNull { it.wholeApp || containsViewId(root, it.viewId) } ?: return
         lastAction = now
-        prefs.feedsBlockedCount = prefs.feedsBlockedCount + 1
-        performGlobalAction(if (hit.goHome) GLOBAL_ACTION_HOME else GLOBAL_ACTION_BACK)
-        toast("Escudo: ${hit.label} bloqueado")
+        when (hit.action) {
+            FeedAction.NOTICE -> {
+                // Un recordatorio como mucho cada 3 minutos por feed: informar, no molestar
+                val key = hit.pkg + hit.label
+                if (now - (lastNotice[key] ?: -NOTICE_EVERY) < NOTICE_EVERY) return
+                lastNotice[key] = now
+                prefs.feedsBlockedCount = prefs.feedsBlockedCount + 1
+                toast(NOTICES[(prefs.feedsBlockedCount % NOTICES.size).toInt()].format(hit.label), long = true)
+            }
+            FeedAction.BACK, FeedAction.HOME -> {
+                prefs.feedsBlockedCount = prefs.feedsBlockedCount + 1
+                performGlobalAction(if (hit.action == FeedAction.HOME) GLOBAL_ACTION_HOME else GLOBAL_ACTION_BACK)
+                toast("Escudo: has salido de ${hit.label}")
+            }
+        }
     }
 
     private fun onAppChanged(pkg: String) {
@@ -156,10 +172,20 @@ class FeedShieldService : AccessibilityService() {
         return false
     }
 
-    private fun toast(msg: String) = main.post { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show() }
+    private fun toast(msg: String, long: Boolean = false) =
+        main.post { Toast.makeText(this, msg, if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show() }
 
     companion object {
         private const val MAX_NODES = 800
+        private const val NOTICE_EVERY = 3 * 60_000L
+
+        /** Recordatorios que explican qué está pasando, en lugar de cerrar la app. */
+        private val NOTICES = listOf(
+            "Estás en %s: cada segundo que miras aquí le enseña al algoritmo qué te engancha.",
+            "%s: el vídeo siguiente está elegido para que no pares. Tú decides cuándo salir.",
+            "%s está diseñado sin final. ¿Sigues aquí porque quieres?",
+            "En %s, pasar rápido lo que no te aporta le da al algoritmo menos datos sobre ti.",
+        )
         private val IGNORED_PKGS = setOf(
             "com.android.systemui", "android", "com.google.android.inputmethod.latin",
             "com.samsung.android.honeyboard", "com.touchtype.swiftkey",

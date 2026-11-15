@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.escudo.audit.PrivacyAuditor
+import app.escudo.core.DomainInfo
 import app.escudo.data.Blocklists
 import app.escudo.data.Prefs
 import app.escudo.data.Upstreams
@@ -71,7 +72,13 @@ fun NetScreen() {
 
     LazyColumn(contentPadding = PaddingValues(vertical = 12.dp)) {
         item {
-            Section("Listas de bloqueo", "Se guardan en el móvil y se actualizan solas cada 3 días") {
+            Section(
+                "Listas de bloqueo", "Se guardan en el móvil y se actualizan solas cada 3 días",
+                explain = "Son listas públicas de dominios de rastreo, publicidad y malware que mantienen voluntarios y " +
+                    "revisan miles de personas. Escudo las descarga directamente de su fuente (GitHub) y las guarda en tu " +
+                    "móvil: no pasan por ningún servidor de Escudo. HaGeZi Pro es la recomendada porque bloquea mucho y " +
+                    "casi nunca rompe nada. Si algo deja de funcionar, mira el registro en vivo y permite ese dominio.",
+            ) {
                 Blocklists.ALL.forEach { bl ->
                     Row(
                         Modifier.fillMaxWidth().clickable {
@@ -110,7 +117,12 @@ fun NetScreen() {
             }
         }
         item {
-            Section("Servidor DNS", "Adónde se envían las consultas que no son rastreadores") {
+            Section(
+                "Servidor DNS", "Adónde se envían las consultas que no son rastreadores",
+                explain = "Las preguntas DNS permitidas tienen que resolverse en algún sitio. Por defecto las resolvería tu " +
+                    "operador, que puede registrar todas las webs que visitas. Quad9 es una fundación suiza sin ánimo de " +
+                    "lucro que no guarda tu IP y además bloquea webs de malware.",
+            ) {
                 Upstreams.ALL.forEach { u ->
                     Row(
                         Modifier.fillMaxWidth().clickable { upstream = u.id; prefs.upstreamDns = u.id; reload() },
@@ -133,7 +145,11 @@ fun NetScreen() {
         }
         item {
             Section(
-                "Apps sin internet",
+                explain = "Muchas apps no necesitan internet para hacer su trabajo (linternas, calculadoras, juegos sin " +
+                    "conexión, teclados) y aun así envían datos. Escudo deja sin respuesta todas sus consultas DNS, así que " +
+                    "no pueden conectarse a nada. Necesita Android 10 o superior para saber qué app hace cada consulta.",
+                title = "Apps sin internet",
+                subtitle =
                 if (Build.VERSION.SDK_INT >= 29) "Estas apps no podrán conectarse a nada (ideal para juegos, linternas, teclados…)"
                 else "Requiere Android 10 o superior",
             ) {
@@ -144,7 +160,11 @@ fun NetScreen() {
         }
         item { ManualRules(prefs) { reload() } }
         item {
-            Section("Registro en vivo", "Toca un dominio para bloquearlo o permitirlo") {
+            Section(
+                "Registro en vivo", "Toca un dominio para saber qué es y bloquearlo o permitirlo",
+                explain = "Aquí ves en tiempo real qué app intenta conectarse a qué servidor. Es la forma más directa de " +
+                    "entender cuánto te rastrean: muchas apps contactan con decenas de empresas nada más abrirlas.",
+            ) {
                 Row {
                     FilterChip(selected = onlyBlocked, onClick = { onlyBlocked = true }, label = { Text("Bloqueados") })
                     Spacer(Modifier.width(8.dp))
@@ -193,7 +213,19 @@ private fun LogRow(e: VpnState.Entry, prefs: Prefs, onChange: () -> Unit) {
         AlertDialog(
             onDismissRequest = { menu = false },
             title = { Text(e.domain) },
-            text = { Text("Solicitado por ${e.app}") },
+            text = {
+                val info = DomainInfo.explain(e.domain)
+                Column {
+                    Text("Lo pidió: ${e.app}", style = MaterialTheme.typography.bodyMedium)
+                    info.owner?.let { Text("Empresa: $it", style = MaterialTheme.typography.bodyMedium) }
+                    Text(info.purpose, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                    Text(
+                        if (e.blocked) "Escudo lo ha bloqueado (${e.reason}): la app no ha podido enviarle datos. Si algo de la app dejó de funcionar, puedes permitirlo."
+                        else "Se ha permitido. Si no te fías de este servidor, puedes bloquearlo para todas las apps.",
+                        style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            },
             confirmButton = {
                 TextButton(onClick = {
                     if (e.blocked) prefs.userAllowed = (prefs.userAllowed + "\n" + e.domain).trim()
