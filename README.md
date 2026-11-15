@@ -42,7 +42,7 @@ Android no permite a una app normal (sin root) modificar otras apps ni el sistem
 - Exportar/importar configuración.
 
 ## Compilar
-Cada cambio en `main` se compila solo en GitHub Actions. Para publicar una versión: crea una etiqueta `vX.Y.Z` y Actions sube el APK firmado a Releases.
+Cada cambio en `main` se compila solo en GitHub Actions. Para publicar una versión: pestaña **Actions → Compilar APK → Run workflow**, escribe la versión (p. ej. `0.2.0`) y pulsa **Run**. Actions sube el APK firmado a Releases y Obtainium lo instala. (También vale crear una etiqueta `vX.Y.Z`.)
 
 ```bash
 ./gradlew assembleRelease   # requiere Android SDK
