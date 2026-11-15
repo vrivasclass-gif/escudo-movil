@@ -1,7 +1,14 @@
 package app.escudo.ui
 
 import android.os.Build
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -39,15 +46,48 @@ fun EscudoTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
-fun Section(title: String, subtitle: String? = null, content: @Composable ColumnScope.() -> Unit) {
+fun Section(
+    title: String,
+    subtitle: String? = null,
+    explain: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             if (subtitle != null) {
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            if (explain != null) Explain(explain)
             Spacer(Modifier.padding(4.dp))
             content()
+        }
+    }
+}
+
+/** Bloque plegable "¿Qué hace esto y por qué?": la parte pedagógica de cada función. */
+@Composable
+fun Explain(text: String, label: String = "¿Qué hace esto y por qué?") {
+    var open by rememberSaveable(text) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+        Text(
+            (if (open) "▾ " else "▸ ") + label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clickable { open = !open }.padding(vertical = 4.dp),
+        )
+        if (open) {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
         }
     }
 }

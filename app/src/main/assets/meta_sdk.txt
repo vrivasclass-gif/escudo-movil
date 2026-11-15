@@ -1,0 +1,8 @@
+# SDK de Facebook/Meta embebido en apps de terceros (App Events, píxel, Audience Network).
+# Es la vía por la que Meta sabe lo que haces FUERA de Instagram y Facebook.
+graph.facebook.com
+connect.facebook.net
+an.facebook.com
+pixel.facebook.com
+graph.accountkit.com
+facebook-hardware.com

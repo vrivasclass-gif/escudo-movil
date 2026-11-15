@@ -138,8 +138,22 @@ class FeedRulesTest {
         val rules = FeedRules.parse(FeedRules.DEFAULT_TEXT)
         assertTrue(rules.any { it.pkg == "com.instagram.android" && it.viewId == "clips_viewer" })
         assertFalse(rules.any { it.pkg == "com.zhiliaoapp.musically" }) // comentada
+        assertFalse(rules.any { it.viewId == "clips_tab" }) // botón siempre visible: causaba cierres
+        assertTrue(rules.all { it.action == FeedAction.NOTICE }) // por defecto nunca se cierra nada
         val r = FeedRules.parse("com.zhiliaoapp.musically | * | inicio | TikTok").single()
-        assertTrue(r.wholeApp); assertTrue(r.goHome); assertEquals("TikTok", r.label)
+        assertTrue(r.wholeApp); assertEquals(FeedAction.HOME, r.action); assertEquals("TikTok", r.label)
+        assertEquals(FeedAction.BACK, FeedRules.parse("a.b | x | atras").single().action)
+        assertEquals(FeedAction.NOTICE, FeedRules.parse("a.b | x").single().action)
+    }
+}
+
+class DomainInfoTest {
+    @Test fun explains() {
+        assertEquals("Google (Firebase Analytics)", DomainInfo.explain("app-measurement.com").owner)
+        assertTrue(DomainInfo.explain("graph.facebook.com").purpose.contains("Instagram"))
+        assertTrue(DomainInfo.explain("ads.example.com").purpose.startsWith("Publicidad"))
+        assertTrue(DomainInfo.explain("telemetry.vendor.net").purpose.startsWith("Analítica"))
+        assertTrue(DomainInfo.explain("roads.example.com").purpose.startsWith("Aparece"))
     }
 }
 
