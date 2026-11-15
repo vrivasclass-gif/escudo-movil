@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Escudo</string>
+    <string name="channel_vpn">Cortafuegos</string>
+    <string name="notif_vpn_title">Escudo está protegiendo tu móvil</string>
+    <string name="notif_vpn_text">Bloqueando rastreadores en local</string>
+    <string name="stop">Detener</string>
+    <string name="shield_service_label">Escudo anti-algoritmo</string>
+    <string name="shield_service_summary">Te saca de los feeds infinitos y aplica tus pausas y límites</string>
+    <string name="shield_service_desc">Escudo usa la accesibilidad solo para reconocer qué pantalla tienes delante (Reels, Shorts, TikTok…) y salir de ella, mostrar la pausa consciente y contar tu tiempo de uso. No lee lo que escribes, no guarda capturas y no envía nada a internet: todo ocurre en tu teléfono. El código es abierto y puedes revisarlo.</string>
+</resources>
