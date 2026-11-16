@@ -16,6 +16,11 @@ import app.escudo.core.FeedRule
 import app.escudo.optimize.Optimizer
 import app.escudo.core.FeedRules
 import app.escudo.data.Prefs
+import app.escudo.core.AppCategory
+import app.escudo.core.BudgetMode
+import app.escudo.core.Game
+import app.escudo.game.GameEngine
+import app.escudo.game.GameStore
 
 /**
  * Escudo anti-algoritmo.
@@ -40,38 +45,63 @@ class FeedShieldService : AccessibilityService() {
     private var lastAction = 0L
     private val lastNotice = HashMap<String, Long>()
 
+    // Estado de la sesión actual en primer plano (para recordatorios y presupuestos)
+    private lateinit var game: GameStore
+    private lateinit var overlay: Overlay
+    private var shortSince = 0L            // desde cuándo estás en vídeo corto en esta sesión (0 = no)
+    private var nextCheckInMin = 0
+    private var checkInCount = 0
+    private val lastOverWarn = HashMap<AppCategory, Long>()
+    private val labels = HashMap<String, String>()
+
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
-                Intent.ACTION_SCREEN_OFF -> { flushUsage(); screenOn = false }
-                Intent.ACTION_SCREEN_ON -> { screenOn = true; foregroundSince = SystemClock.elapsedRealtime() }
+                Intent.ACTION_SCREEN_OFF -> { flushUsage(); screenOn = false; shortSince = 0; overlay.dismiss() }
+                Intent.ACTION_SCREEN_ON -> {
+                    screenOn = true; foregroundSince = SystemClock.elapsedRealtime()
+                    foregroundPkg?.let { startSession(it) }
+                }
             }
         }
     }
 
-    /** Revisa cada 30 s si la app en primer plano ha superado su límite. */
+    /** Cada 15 s: tiempo de uso, límites, presupuestos, recordatorios, modo foco y cierre del día. */
     private val limitTick = object : Runnable {
         override fun run() {
-            flushUsage()
-            foregroundPkg?.let { enforceLimit(it) }
-            Optimizer.applyGraySchedule(this@FeedShieldService)
-            main.postDelayed(this, 30_000)
+            val ctx = this@FeedShieldService
+            try {
+                flushUsage()
+                if (game.lastDay != java.time.LocalDate.now().toString()) {
+                    GameEngine.rollover(ctx); prefs.cleanupOldUsage()
+                }
+                GameEngine.checkFocus(ctx)
+                foregroundPkg?.let { pkg ->
+                    if (screenOn && !enforceLimit(pkg) && !enforceBudget(pkg)) checkIn(pkg)
+                }
+                Optimizer.applyGraySchedule(ctx)
+            } catch (_: Exception) {}
+            main.postDelayed(this, TICK_MS)
         }
     }
 
     override fun onServiceConnected() {
         prefs = Prefs(this)
+        game = GameStore(this)
+        overlay = Overlay(this)
+        GameEngine.rollover(this) // cierra el día anterior antes de borrar su uso
         prefs.cleanupOldUsage()
         registerReceiver(screenReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON)
         })
-        main.postDelayed(limitTick, 30_000)
+        main.postDelayed(limitTick, TICK_MS)
         ShieldState.connected = true
     }
 
     override fun onDestroy() {
         ShieldState.connected = false
         main.removeCallbacksAndMessages(null)
+        if (::overlay.isInitialized) overlay.dismiss()
         try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
         super.onDestroy()
     }
@@ -99,7 +129,9 @@ class FeedShieldService : AccessibilityService() {
         lastAction = now
         when (hit.action) {
             FeedAction.NOTICE -> {
-                // Un recordatorio como mucho cada 3 minutos por feed: informar, no molestar
+                // Entras en vídeo corto: a partir de aquí cuentan los recordatorios de tiempo
+                if (shortSince == 0L) shortSince = SystemClock.elapsedRealtime()
+                // Un aviso al entrar (como mucho cada 3 min); después hablan los recordatorios
                 val key = hit.pkg + hit.label
                 if (now - (lastNotice[key] ?: -NOTICE_EVERY) < NOTICE_EVERY) return
                 lastNotice[key] = now
@@ -114,11 +146,25 @@ class FeedShieldService : AccessibilityService() {
         }
     }
 
+    private fun startSession(pkg: String) {
+        shortSince = if (GameEngine.categoryOf(this, pkg) == AppCategory.SHORT_VIDEO) SystemClock.elapsedRealtime() else 0
+        nextCheckInMin = game.checkInMinutes
+    }
+
     private fun onAppChanged(pkg: String) {
         flushUsage()
         foregroundPkg = pkg
         foregroundSince = SystemClock.elapsedRealtime()
+        // Al volver al escritorio la tarjeta se queda (normalmente la acabamos de mostrar al sacarte)
+        if (!isLauncher(pkg)) overlay.dismiss()
+        startSession(pkg)
+        val cat = GameEngine.categoryOf(this, pkg)
+        if (cat.trap) {
+            GameEngine.onTrapOpened(this)
+            if (game.focusActive) { focusBlock(); return }
+        }
         if (enforceLimit(pkg)) return
+        if (enforceBudget(pkg)) return
 
         val pauseSecs = prefs.pauseApps[pkg] ?: return
         if (System.currentTimeMillis() < prefs.allowUntil(pkg)) return
@@ -137,6 +183,111 @@ class FeedShieldService : AccessibilityService() {
         performGlobalAction(GLOBAL_ACTION_HOME)
         toast("Límite diario de $limitMin min alcanzado")
         return true
+    }
+
+    private fun label(pkg: String) = labels.getOrPut(pkg) {
+        try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() } catch (_: Exception) { pkg }
+    }
+
+    private fun goHome() = performGlobalAction(GLOBAL_ACTION_HOME)
+
+    private val launchers: Set<String> by lazy {
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        @Suppress("DEPRECATION")
+        packageManager.queryIntentActivities(home, 0).map { it.activityInfo.packageName }.toSet()
+    }
+
+    private fun isLauncher(pkg: String) = pkg in launchers
+
+    private fun focusBlock() {
+        goHome()
+        val left = ((game.focusUntil - System.currentTimeMillis()) / 60_000 + 1).coerceAtLeast(1)
+        overlay.show(
+            "🎯 Modo foco: quedan $left min",
+            "Esta app es de tus apps trampa. Aguanta y ganas ${game.focusLength + Game.Xp.FOCUS_BONUS} XP.\n" +
+                "Idea: ${Game.ALTERNATIVES.random()}",
+            listOf(
+                Overlay.Action("Rendirme") { GameEngine.giveUpFocus(this) },
+                Overlay.Action("¡Aguanto! 💪", primary = true) {},
+            ),
+        )
+    }
+
+    /**
+     * Presupuesto diario por categoría. Devuelve true si ha cerrado la app.
+     * Modo "avisar": avisa al 80 % y al agotarlo (cada 10 min). Modo "bloquear": cierra al agotarlo.
+     */
+    private fun enforceBudget(pkg: String): Boolean {
+        val cat = GameEngine.categoryOf(this, pkg)
+        val budget = game.budget(cat)
+        val mode = game.mode(cat)
+        if (budget <= 0 || mode == BudgetMode.COUNT) return false
+        if (System.currentTimeMillis() < game.extraUntil(cat)) return false
+        val used = GameEngine.minutesOfPackages(this, cat)
+        val now = SystemClock.elapsedRealtime()
+
+        if (used >= budget) {
+            if (mode == BudgetMode.BLOCK) {
+                goHome()
+                val actions = mutableListOf(Overlay.Action("Vale 👍", primary = true) {})
+                if (!game.extraUsedToday(cat) && game.xp >= Game.Xp.EXTRA_TIME_COST) {
+                    actions.add(0, Overlay.Action("Comodín 5 min (−${Game.Xp.EXTRA_TIME_COST} XP)") {
+                        if (GameEngine.buyExtraTime(this, cat)) {
+                            packageManager.getLaunchIntentForPackage(pkg)?.let { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        }
+                    })
+                }
+                overlay.show(
+                    "🔒 ${cat.emoji} ${cat.label}: presupuesto agotado",
+                    "Has usado tus $budget min de hoy. Mañana se recarga.\nIdea: ${Game.ALTERNATIVES.random()}",
+                    actions,
+                )
+                return true
+            }
+            if (now - (lastOverWarn[cat] ?: -OVER_EVERY) >= OVER_EVERY && !overlay.showing) {
+                lastOverWarn[cat] = now
+                val streak = game.streak.days
+                overlay.show(
+                    "🚩 ${cat.emoji} Presupuesto de ${cat.label} gastado",
+                    "Llevas $used de $budget min hoy. " +
+                        (if (streak > 0) "Si sigues, hoy no sumará a tu racha 🔥$streak (salvo comodín ❄️). " else "") +
+                        "¿Lo dejas aquí?",
+                    listOf(
+                        Overlay.Action("Sigo") {},
+                        Overlay.Action("Salgo +${Game.Xp.BUDGET_EXIT} XP", primary = true) { goHome(); GameEngine.onBudgetExit(this, cat) },
+                    ),
+                )
+            }
+            return false
+        }
+        if (used * 10 >= budget * 8 && !game.warned("80_${cat.id}") && !overlay.showing) {
+            game.setWarned("80_${cat.id}")
+            overlay.show(
+                "⚠️ Te quedan ${budget - used} min de ${cat.label}",
+                "Ya has usado el 80 % de tu presupuesto de hoy. Úsalos en lo que más te importe.",
+                listOf(Overlay.Action("Entendido", primary = true) {}),
+            )
+        }
+        return false
+    }
+
+    /** Recordatorio cada pocos minutos mientras estás en vídeo corto. */
+    private fun checkIn(pkg: String) {
+        if (!game.checkInEnabled || shortSince == 0L || overlay.showing) return
+        val minutes = ((SystemClock.elapsedRealtime() - shortSince) / 60_000).toInt()
+        if (minutes < nextCheckInMin) return
+        nextCheckInMin = minutes + game.checkInMinutes
+        val app = label(pkg)
+        overlay.show(
+            "⏱️ $minutes min en $app",
+            Game.checkInText(checkInCount++, minutes, app, game.goal),
+            listOf(
+                Overlay.Action("Me aporta, sigo") {},
+                Overlay.Action("Me salgo 💪 +${Game.Xp.REEL_EXIT} XP", primary = true) {
+                    goHome(); shortSince = 0; GameEngine.onReelExit(this)
+                },
+            ),
+        )
     }
 
     private fun flushUsage() {
@@ -178,6 +329,8 @@ class FeedShieldService : AccessibilityService() {
     companion object {
         private const val MAX_NODES = 800
         private const val NOTICE_EVERY = 3 * 60_000L
+        private const val TICK_MS = 15_000L
+        private const val OVER_EVERY = 10 * 60_000L
 
         /** Recordatorios que explican qué está pasando, en lugar de cerrar la app. */
         private val NOTICES = listOf(

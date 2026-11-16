@@ -292,7 +292,7 @@ fun HardeningDialog(pkg: String, label: String, onDismiss: () -> Unit) {
         title = { Text("Quitar datos a $label") },
         text = {
             Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
-                if (!ready) Text("Necesitas Shizuku conectado (pestaña Optimizar).", color = MaterialTheme.colorScheme.error)
+                if (!ready) Text("Necesitas Shizuku conectado (Más → Optimizar).", color = MaterialTheme.colorScheme.error)
                 Text("Marca lo que quieres quitarle. Lo recomendado ya está marcado.", style = MaterialTheme.typography.bodySmall)
                 Optimizer.HARDENING.forEach { h -> HardeningRow(h, h.id in chosen) { on -> chosen = if (on) chosen + h.id else chosen - h.id } }
             }

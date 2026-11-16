@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.escudo.data.Prefs
+import app.escudo.game.GameEngine
 import app.escudo.ui.EscudoTheme
 import kotlinx.coroutines.delay
 
@@ -66,8 +67,8 @@ class PauseActivity : ComponentActivity() {
                         Spacer(Modifier.height(8.dp))
                         Text("Hoy llevas $usedMin min en esta app.", style = MaterialTheme.typography.bodyMedium)
                         Spacer(Modifier.height(40.dp))
-                        Button(onClick = { goHome() }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Mejor no, volver al inicio")
+                        Button(onClick = { GameEngine.onPauseResist(this@PauseActivity); goHome() }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Mejor no 💪 (+10 XP)")
                         }
                         Spacer(Modifier.height(12.dp))
                         OutlinedButton(
