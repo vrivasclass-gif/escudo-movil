@@ -101,6 +101,7 @@ fun TimeScreen() {
                         }
                     }
                 }
+                LiveCheck(tick = rememberTicker(2000))
             }
         }
         item {
@@ -237,5 +238,38 @@ private fun CategoryAssignDialog(store: GameStore, onDismiss: () -> Unit) {
         dismissButton = {
             TextButton(onClick = { overrides = emptyMap(); store.overrides = overrides }) { Text("Restablecer") }
         },
+    )
+}
+
+/** Prueba en vivo: muestra qué ve el escudo ahora mismo y permite probar la tarjeta. */
+@Composable
+private fun LiveCheck(tick: Long) {
+    val ctx = LocalContext.current
+    var open by remember { mutableStateOf(false) }
+    TextButton(onClick = { open = !open }) { Text(if (open) "Ocultar prueba" else "🔍 ¿No te salen? Haz la prueba") }
+    if (!open) return
+    key(tick) {
+        val s = app.escudo.shield.ShieldState
+        val alive = s.connected && System.currentTimeMillis() - s.lastTick < 40_000
+        val lines = buildList {
+            add(if (s.connected) "✅ Accesibilidad activada" else "❌ Accesibilidad desactivada: actívala en Ajustes → Accesibilidad → Escudo")
+            if (s.connected) add(if (alive) "✅ El escudo está trabajando" else "⏳ Esperando al escudo… (si dura más de 30 s, desactiva y vuelve a activar Escudo en Accesibilidad)")
+            if (s.foreground.isNotBlank()) add("📱 Última app vista: ${s.foreground}")
+            add(
+                if (s.shortLabel.isNotBlank()) "🎬 Detectado: ${s.shortLabel} · ${s.shortMinutes} min (recordatorio al llegar a ${s.nextCheckIn} min)"
+                else "🎬 Ahora no detecto vídeo corto. Abre Reels, Shorts o TikTok, vuelve aquí en menos de un minuto y mira esta línea."
+            )
+            if (s.lastError.isNotBlank()) add("⚠️ Último error: ${s.lastError}")
+        }
+        lines.forEach { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 2.dp)) }
+    }
+    TextButton(
+        enabled = app.escudo.shield.ShieldState.instance != null,
+        onClick = { app.escudo.shield.ShieldState.instance?.testOverlay() },
+    ) { Text("Mostrar una tarjeta de prueba") }
+    Text(
+        "Si la tarjeta de prueba no aparece, es un bloqueo del móvil: en Xiaomi ve a Ajustes → Apps → Escudo → " +
+            "Otros permisos y activa \"Mostrar ventanas emergentes\" y \"Mostrar en pantalla de bloqueo\".",
+        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }

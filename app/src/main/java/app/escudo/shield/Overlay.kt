@@ -85,7 +85,10 @@ class Overlay(private val service: AccessibilityService) {
             wm.addView(card, lp)
             current = card
             main.postDelayed(autoDismiss, 25_000)
-        } catch (_: Exception) { current = null }
+        } catch (e: Exception) {
+            current = null
+            ShieldState.lastError = "tarjeta: ${e.javaClass.simpleName} ${e.message ?: ""}".take(200)
+        }
     }
 
     fun dismiss() {

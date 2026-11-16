@@ -51,6 +51,7 @@ class FeedShieldService : AccessibilityService() {
     private var shortSince = 0L            // desde cuándo estás en vídeo corto en esta sesión (0 = no)
     private var lastShortSeen = 0L         // última vez que vimos un feed de vídeo corto en pantalla
     private var shortLabel = ""            // "Reels de Instagram", "Shorts de YouTube", "TikTok"…
+    private var shortPkg: String? = null   // app donde vimos el feed
     private var nextCheckInMin = 0
     private var checkInCount = 0
     private val lastOverWarn = HashMap<AppCategory, Long>()
@@ -69,19 +70,24 @@ class FeedShieldService : AccessibilityService() {
     private val limitTick = object : Runnable {
         override fun run() {
             val ctx = this@FeedShieldService
-            try {
-                flushUsage()
-                if (game.lastDay != java.time.LocalDate.now().toString()) {
-                    GameEngine.rollover(ctx); prefs.cleanupOldUsage()
-                }
-                GameEngine.checkFocus(ctx)
-                // Si llevas más de 45 s sin ver ningún feed de vídeo corto, la sesión de scroll termina
-                if (shortSince != 0L && SystemClock.elapsedRealtime() - lastShortSeen > SHORT_GRACE) endShort()
+            // Cada paso por separado: si uno falla, los recordatorios siguen funcionando
+            step("uso") { flushUsage() }
+            step("cierre del día") {
+                if (game.lastDay != java.time.LocalDate.now().toString()) { GameEngine.rollover(ctx); prefs.cleanupOldUsage() }
+            }
+            step("foco") { GameEngine.checkFocus(ctx) }
+            step("recordatorio") {
+                val now = SystemClock.elapsedRealtime()
+                // Si llevas un rato sin ver ningún feed de vídeo corto, la sesión de scroll termina.
+                // Dentro de la misma app damos más margen: hay vídeos que no generan eventos mientras se reproducen.
+                val grace = if (foregroundPkg == shortPkg) SHORT_GRACE_SAME_APP else SHORT_GRACE
+                if (shortSince != 0L && now - lastShortSeen > grace) endShort()
                 foregroundPkg?.let { pkg ->
                     if (screenOn && !enforceLimit(pkg) && !enforceBudget(pkg)) checkIn(pkg)
                 }
-                Optimizer.applyGraySchedule(ctx)
-            } catch (_: Exception) {}
+            }
+            step("grises") { Optimizer.applyGraySchedule(ctx) }
+            publishState()
             main.postDelayed(this, TICK_MS)
         }
     }
@@ -90,17 +96,21 @@ class FeedShieldService : AccessibilityService() {
         prefs = Prefs(this)
         game = GameStore(this)
         overlay = Overlay(this)
-        GameEngine.rollover(this) // cierra el día anterior antes de borrar su uso
-        prefs.cleanupOldUsage()
+        step("inicio") {
+            GameEngine.rollover(this) // cierra el día anterior antes de borrar su uso
+            prefs.cleanupOldUsage()
+        }
         registerReceiver(screenReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON)
         })
         main.postDelayed(limitTick, TICK_MS)
         ShieldState.connected = true
+        ShieldState.instance = this
     }
 
     override fun onDestroy() {
         ShieldState.connected = false
+        ShieldState.instance = null
         main.removeCallbacksAndMessages(null)
         if (::overlay.isInitialized) overlay.dismiss()
         try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
@@ -110,6 +120,14 @@ class FeedShieldService : AccessibilityService() {
     override fun onInterrupt() {}
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
+        // Un fallo aquí haría que Android apagara el servicio: lo apuntamos y seguimos
+        try { handleEvent(event) } catch (t: Throwable) {
+            ShieldState.lastError = "evento: ${t.javaClass.simpleName} ${t.message ?: ""}".take(200)
+        }
+    }
+
+    private fun handleEvent(event: AccessibilityEvent) {
+        if (!::game.isInitialized) return
         val pkg = event.packageName?.toString() ?: return
         if (pkg == packageName || pkg in IGNORED_PKGS) return
 
@@ -159,9 +177,32 @@ class FeedShieldService : AccessibilityService() {
         }
         lastShortSeen = now
         shortLabel = label
+        shortPkg = foregroundPkg
     }
 
-    private fun endShort() { shortSince = 0; lastShortSeen = 0 }
+    private fun endShort() { shortSince = 0; lastShortSeen = 0; shortPkg = null }
+
+    private fun step(name: String, block: () -> Unit) {
+        try { block() } catch (t: Throwable) { ShieldState.lastError = "$name: ${t.javaClass.simpleName} ${t.message ?: ""}".take(200) }
+    }
+
+    /** Copia el estado interno para que la app pueda enseñarlo en la prueba en vivo. */
+    private fun publishState() {
+        ShieldState.lastTick = System.currentTimeMillis()
+        ShieldState.foreground = foregroundPkg?.let { label(it) } ?: ""
+        ShieldState.shortLabel = if (shortSince != 0L) shortLabel else ""
+        ShieldState.shortMinutes = if (shortSince != 0L) ((SystemClock.elapsedRealtime() - shortSince) / 60_000).toInt() else 0
+        ShieldState.nextCheckIn = nextCheckInMin
+    }
+
+    /** Muestra una tarjeta de prueba ahora mismo (botón de la pestaña Tiempo). */
+    fun testOverlay() {
+        overlay.show(
+            "✅ Así se ven los recordatorios",
+            "Si ves esta tarjeta, Escudo puede mostrarte avisos encima de cualquier app.",
+            listOf(Overlay.Action("Genial", primary = true) {}),
+        )
+    }
 
     private fun onAppChanged(pkg: String) {
         flushUsage()
@@ -353,7 +394,8 @@ class FeedShieldService : AccessibilityService() {
 
     companion object {
         private const val MAX_NODES = 2500
-        private const val SHORT_GRACE = 45_000L
+        private const val SHORT_GRACE = 60_000L
+        private const val SHORT_GRACE_SAME_APP = 4 * 60_000L
         private const val NOTICE_EVERY = 3 * 60_000L
         private const val TICK_MS = 15_000L
         private const val OVER_EVERY = 10 * 60_000L
@@ -374,4 +416,12 @@ class FeedShieldService : AccessibilityService() {
 
 object ShieldState {
     @Volatile var connected = false
+    @Volatile var instance: FeedShieldService? = null
+    // Estado en vivo para la prueba de la pestaña Tiempo
+    @Volatile var lastTick = 0L
+    @Volatile var foreground = ""
+    @Volatile var shortLabel = ""
+    @Volatile var shortMinutes = 0
+    @Volatile var nextCheckIn = 0
+    @Volatile var lastError = ""
 }
