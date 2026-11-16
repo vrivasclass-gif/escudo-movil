@@ -49,6 +49,8 @@ class FeedShieldService : AccessibilityService() {
     private lateinit var game: GameStore
     private lateinit var overlay: Overlay
     private var shortSince = 0L            // desde cuándo estás en vídeo corto en esta sesión (0 = no)
+    private var lastShortSeen = 0L         // última vez que vimos un feed de vídeo corto en pantalla
+    private var shortLabel = ""            // "Reels de Instagram", "Shorts de YouTube", "TikTok"…
     private var nextCheckInMin = 0
     private var checkInCount = 0
     private val lastOverWarn = HashMap<AppCategory, Long>()
@@ -57,11 +59,8 @@ class FeedShieldService : AccessibilityService() {
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
-                Intent.ACTION_SCREEN_OFF -> { flushUsage(); screenOn = false; shortSince = 0; overlay.dismiss() }
-                Intent.ACTION_SCREEN_ON -> {
-                    screenOn = true; foregroundSince = SystemClock.elapsedRealtime()
-                    foregroundPkg?.let { startSession(it) }
-                }
+                Intent.ACTION_SCREEN_OFF -> { flushUsage(); screenOn = false; endShort(); overlay.dismiss() }
+                Intent.ACTION_SCREEN_ON -> { screenOn = true; foregroundSince = SystemClock.elapsedRealtime() }
             }
         }
     }
@@ -76,6 +75,8 @@ class FeedShieldService : AccessibilityService() {
                     GameEngine.rollover(ctx); prefs.cleanupOldUsage()
                 }
                 GameEngine.checkFocus(ctx)
+                // Si llevas más de 45 s sin ver ningún feed de vídeo corto, la sesión de scroll termina
+                if (shortSince != 0L && SystemClock.elapsedRealtime() - lastShortSeen > SHORT_GRACE) endShort()
                 foregroundPkg?.let { pkg ->
                     if (screenOn && !enforceLimit(pkg) && !enforceBudget(pkg)) checkIn(pkg)
                 }
@@ -115,22 +116,26 @@ class FeedShieldService : AccessibilityService() {
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != foregroundPkg) {
             onAppChanged(pkg)
         }
-        if (!prefs.shieldEnabled || System.currentTimeMillis() < prefs.shieldSnoozeUntil) return
+        val now = SystemClock.elapsedRealtime()
+
+        // Apps que son vídeo corto de principio a fin (TikTok…), según su categoría
+        if (GameEngine.categoryOf(this, pkg) == AppCategory.SHORT_VIDEO) markShort(label(pkg), now)
 
         val pkgRules = currentRules()[pkg] ?: return
-        val now = SystemClock.elapsedRealtime()
         if (now - lastAction < 1500) return
         // Recorrer el árbol de vistas cuesta: como mucho 2 veces por segundo
         if (now - lastScan < 500 && event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         lastScan = now
 
         val root = rootInActiveWindow ?: return
-        val hit = pkgRules.firstOrNull { it.wholeApp || containsViewId(root, it.viewId) } ?: return
+        if (root.packageName?.toString() != pkg) return
+        val hit = pkgRules.firstOrNull { it.wholeApp || matches(root, it) } ?: return
         lastAction = now
         when (hit.action) {
             FeedAction.NOTICE -> {
-                // Entras en vídeo corto: a partir de aquí cuentan los recordatorios de tiempo
-                if (shortSince == 0L) shortSince = SystemClock.elapsedRealtime()
+                // Estás en vídeo corto: cuentan los recordatorios de tiempo (aunque los avisos estén apagados)
+                markShort(hit.label, now)
+                if (!prefs.shieldEnabled || System.currentTimeMillis() < prefs.shieldSnoozeUntil) return
                 // Un aviso al entrar (como mucho cada 3 min); después hablan los recordatorios
                 val key = hit.pkg + hit.label
                 if (now - (lastNotice[key] ?: -NOTICE_EVERY) < NOTICE_EVERY) return
@@ -139,6 +144,7 @@ class FeedShieldService : AccessibilityService() {
                 toast(NOTICES[(prefs.feedsBlockedCount % NOTICES.size).toInt()].format(hit.label), long = true)
             }
             FeedAction.BACK, FeedAction.HOME -> {
+                if (!prefs.shieldEnabled || System.currentTimeMillis() < prefs.shieldSnoozeUntil) return
                 prefs.feedsBlockedCount = prefs.feedsBlockedCount + 1
                 performGlobalAction(if (hit.action == FeedAction.HOME) GLOBAL_ACTION_HOME else GLOBAL_ACTION_BACK)
                 toast("Escudo: has salido de ${hit.label}")
@@ -146,10 +152,16 @@ class FeedShieldService : AccessibilityService() {
         }
     }
 
-    private fun startSession(pkg: String) {
-        shortSince = if (GameEngine.categoryOf(this, pkg) == AppCategory.SHORT_VIDEO) SystemClock.elapsedRealtime() else 0
-        nextCheckInMin = game.checkInMinutes
+    private fun markShort(label: String, now: Long) {
+        if (shortSince == 0L) {
+            shortSince = now
+            nextCheckInMin = game.checkInMinutes
+        }
+        lastShortSeen = now
+        shortLabel = label
     }
+
+    private fun endShort() { shortSince = 0; lastShortSeen = 0 }
 
     private fun onAppChanged(pkg: String) {
         flushUsage()
@@ -157,7 +169,6 @@ class FeedShieldService : AccessibilityService() {
         foregroundSince = SystemClock.elapsedRealtime()
         // Al volver al escritorio la tarjeta se queda (normalmente la acabamos de mostrar al sacarte)
         if (!isLauncher(pkg)) overlay.dismiss()
-        startSession(pkg)
         val cat = GameEngine.categoryOf(this, pkg)
         if (cat.trap) {
             GameEngine.onTrapOpened(this)
@@ -277,14 +288,14 @@ class FeedShieldService : AccessibilityService() {
         val minutes = ((SystemClock.elapsedRealtime() - shortSince) / 60_000).toInt()
         if (minutes < nextCheckInMin) return
         nextCheckInMin = minutes + game.checkInMinutes
-        val app = label(pkg)
+        val app = shortLabel.ifBlank { label(pkg) }
         overlay.show(
             "⏱️ $minutes min en $app",
             Game.checkInText(checkInCount++, minutes, app, game.goal),
             listOf(
                 Overlay.Action("Me aporta, sigo") {},
                 Overlay.Action("Me salgo 💪 +${Game.Xp.REEL_EXIT} XP", primary = true) {
-                    goHome(); shortSince = 0; GameEngine.onReelExit(this)
+                    goHome(); endShort(); GameEngine.onReelExit(this)
                 },
             ),
         )
@@ -308,8 +319,18 @@ class FeedShieldService : AccessibilityService() {
         return rules
     }
 
-    /** Búsqueda en anchura del id de vista, limitada para no gastar batería. */
-    private fun containsViewId(root: AccessibilityNodeInfo, fragment: String): Boolean {
+    /**
+     * ¿Está en pantalla alguna de las vistas de la regla? Primero la búsqueda
+     * rápida de Android por id exacto; si no, un recorrido en anchura limitado
+     * que busca fragmentos de id y pestañas seleccionadas.
+     */
+    private fun matches(root: AccessibilityNodeInfo, rule: FeedRule): Boolean {
+        val frags = rule.fragments
+        val tabs = rule.selectedTabs
+        for (f in frags) {
+            val exact = try { root.findAccessibilityNodeInfosByViewId("${rule.pkg}:id/$f") } catch (_: Exception) { null }
+            if (exact?.any { it.isVisibleToUser } == true) return true
+        }
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
         var visited = 0
@@ -317,7 +338,11 @@ class FeedShieldService : AccessibilityService() {
             val n = queue.removeFirst()
             visited++
             val id = n.viewIdResourceName
-            if (id != null && id.contains(fragment) && n.isVisibleToUser) return true
+            if (id != null && n.isVisibleToUser && frags.any { id.contains(it) }) return true
+            if (tabs.isNotEmpty() && n.isSelected) {
+                val name = (n.contentDescription ?: n.text)?.toString()?.trim()
+                if (name != null && tabs.any { name.equals(it, true) }) return true
+            }
             for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
         }
         return false
@@ -327,7 +352,8 @@ class FeedShieldService : AccessibilityService() {
         main.post { Toast.makeText(this, msg, if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show() }
 
     companion object {
-        private const val MAX_NODES = 800
+        private const val MAX_NODES = 2500
+        private const val SHORT_GRACE = 45_000L
         private const val NOTICE_EVERY = 3 * 60_000L
         private const val TICK_MS = 15_000L
         private const val OVER_EVERY = 10 * 60_000L

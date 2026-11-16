@@ -136,8 +136,11 @@ class DnsTest {
 class FeedRulesTest {
     @Test fun parsesDefaults() {
         val rules = FeedRules.parse(FeedRules.DEFAULT_TEXT)
-        assertTrue(rules.any { it.pkg == "com.instagram.android" && it.viewId == "clips_viewer" })
-        assertFalse(rules.any { it.pkg == "com.zhiliaoapp.musically" }) // comentada
+        assertTrue(rules.any { it.pkg == "com.instagram.android" && "clips_viewer" in it.fragments })
+        val yt = rules.first { it.pkg == "com.google.android.youtube" }
+        assertTrue("reel_player" in yt.fragments)
+        assertEquals(listOf("Shorts"), yt.selectedTabs)
+        assertTrue(rules.any { it.pkg == "com.zhiliaoapp.musically" && it.wholeApp })
         assertFalse(rules.any { it.viewId == "clips_tab" }) // botón siempre visible: causaba cierres
         assertTrue(rules.all { it.action == FeedAction.NOTICE }) // por defecto nunca se cierra nada
         val r = FeedRules.parse("com.zhiliaoapp.musically | * | inicio | TikTok").single()

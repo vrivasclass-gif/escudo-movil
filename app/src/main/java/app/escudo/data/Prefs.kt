@@ -63,8 +63,8 @@ class Prefs(context: Context) {
     // ---------- Escudo anti-algoritmo ----------
     var feedRulesText: String
         // v2: las reglas de la 0.1 expulsaban y una de ellas (clips_tab) cerraba Instagram sin parar
-        get() = p.getString("feed_rules_v2", FeedRules.DEFAULT_TEXT) ?: FeedRules.DEFAULT_TEXT
-        set(v) = p.edit().putString("feed_rules_v2", v).apply()
+        get() = p.getString("feed_rules_v3", FeedRules.DEFAULT_TEXT) ?: FeedRules.DEFAULT_TEXT
+        set(v) = p.edit().putString("feed_rules_v3", v).apply()
 
     var shieldEnabled: Boolean
         get() = p.getBoolean("shield_on", true)
