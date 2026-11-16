@@ -230,3 +230,19 @@ class GameTest {
         assertTrue(Game.equivalent(130).contains("peli"))
     }
 }
+
+class ShellErrorsTest {
+    @org.junit.Test
+    fun xiaomiSecuritySetting() {
+        val out = "Exception occurred while executing 'disable-user':\njava.lang.SecurityException: Shell cannot change component state for com.miui.analytics/null to 3"
+        org.junit.Assert.assertTrue(ShellErrors.explain(out, xiaomi = true).contains("Depuración USB (ajustes de seguridad)"))
+        org.junit.Assert.assertFalse(ShellErrors.explain(out, xiaomi = false).contains("Xiaomi"))
+    }
+
+    @org.junit.Test
+    fun otherErrors() {
+        org.junit.Assert.assertTrue(ShellErrors.explain("Failure [DELETE_FAILED_USER_RESTRICTED]", true).contains("Xiaomi"))
+        org.junit.Assert.assertTrue(ShellErrors.explain("Unknown package: x.y", false).contains("ya no está"))
+        org.junit.Assert.assertTrue(ShellErrors.explain("", false).contains("Reinicia Shizuku"))
+    }
+}

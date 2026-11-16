@@ -53,12 +53,17 @@ fun OptimizeScreen() {
     val canWrite = remember(tick) { Optimizer.canWriteSecure(ctx) }
     var refresh by remember { mutableIntStateOf(0) }
     var picker by remember { mutableStateOf<String?>(null) }
+    var report by remember { mutableStateOf<Pair<String, String>?>(null) } // título, texto
+    var busy by remember { mutableStateOf(false) }
 
     fun toast(msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+    // Mensajes cortos en un aviso; los largos (errores con solución) en un cuadro que se puede leer con calma
     fun bg(block: () -> String) = scope.launch {
+        busy = true
         val msg = withContext(Dispatchers.IO) { block() }
+        busy = false
         refresh++
-        toast(msg)
+        if (msg.contains('\n')) report = "Resultado" to msg else toast(msg)
     }
 
     LazyColumn(contentPadding = PaddingValues(vertical = 12.dp)) {
@@ -74,6 +79,23 @@ fun OptimizeScreen() {
             ) {}
         }
         item { ShizukuCard(state) }
+        if (ready) item {
+            Section(
+                "Comprobar que todo funciona", if (busy) "Trabajando…" else "Prueba Shizuku y los bloqueos de tu fabricante",
+                explain = "Hace una prueba rápida sin cambiar nada: confirma que Shizuku responde, y en Xiaomi comprueba el " +
+                    "ajuste \"Depuración USB (ajustes de seguridad)\", que es la causa más habitual de que no se puedan " +
+                    "quitar apps ni permisos.",
+            ) {
+                Button(enabled = !busy, onClick = {
+                    scope.launch {
+                        busy = true
+                        val r = withContext(Dispatchers.IO) { Optimizer.diagnose(ctx) }
+                        busy = false
+                        report = "Diagnóstico" to r
+                    }
+                }) { Text("Hacer la prueba 🔍") }
+            }
+        }
         item {
             Section(
                 "Permiso permanente para Escudo",
@@ -98,8 +120,9 @@ fun OptimizeScreen() {
                 if (installed.isEmpty()) "No he encontrado bloatware conocido en tu móvil" else "${installed.size} encontradas en tu móvil",
                 explain = "Son apps que el fabricante o el operador instalan y que no se pueden desinstalar. Muchas recogen datos o " +
                     "muestran anuncios aunque nunca las abras.\n\n\"Desactivar\" no borra nada: la app se congela, deja de " +
-                    "funcionar y desaparece del cajón de apps. Puedes reactivarla cuando quieras. Solo aparecen las que sé " +
-                    "que se pueden desactivar sin romper el sistema.",
+                    "funcionar y desaparece del cajón de apps. Si el fabricante no deja congelarla (pasa en Xiaomi), Escudo la " +
+                    "quita solo para tu usuario: sigue guardada en el sistema y se recupera desde el historial. Solo aparecen " +
+                    "las que sé que se pueden quitar sin romper el sistema.",
             ) {
                 installed.forEach { b ->
                     val enabled = remember(refresh) { Optimizer.isEnabled(ctx, b.pkg) }
@@ -112,7 +135,7 @@ fun OptimizeScreen() {
                         Switch(checked = !enabled, enabled = ready, onCheckedChange = { off ->
                             bg {
                                 val r = if (off) Optimizer.disableApp(ctx, b.pkg, b.name) else Optimizer.enableApp(ctx, b.pkg)
-                                if (r.ok) (if (off) "${b.name} desactivada" else "${b.name} reactivada") else "Error: ${r.out}"
+                                if (r.ok) (if (off) r.out else "${b.name} reactivada") else "No se pudo con ${b.name}\n\n${r.out}"
                             }
                         })
                     }
@@ -156,10 +179,24 @@ fun OptimizeScreen() {
         }
     }
 
+    report?.let { (title, text) ->
+        AlertDialog(
+            onDismissRequest = { report = null },
+            title = { Text(title) },
+            text = { Text(text, Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall) },
+            confirmButton = { TextButton(onClick = { report = null }) { Text("Entendido") } },
+            dismissButton = {
+                if (Optimizer.isXiaomi) TextButton(onClick = {
+                    open(ctx, Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+                }) { Text("Opciones de desarrollador") }
+            },
+        )
+    }
+
     when (picker) {
         "disable" -> SingleAppPicker("¿Qué app quieres desactivar?", onDismiss = { picker = null }) { pkg, label ->
             picker = null
-            bg { val r = Optimizer.disableApp(ctx, pkg, label); if (r.ok) "$label desactivada" else "Error: ${r.out}" }
+            bg { val r = Optimizer.disableApp(ctx, pkg, label); if (r.ok) r.out else "No se pudo con $label\n\n${r.out}" }
         }
         "harden" -> {
             var target by remember { mutableStateOf<Pair<String, String>?>(null) }
