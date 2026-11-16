@@ -26,8 +26,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -69,16 +71,23 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Tab(val label: String, val icon: Int) {
-    HOME("Inicio", R.drawable.ic_shield),
-    NET("Red", R.drawable.ic_net),
+    ME("Yo", R.drawable.ic_person),
+    TIME("Tiempo", R.drawable.ic_timer),
     SHIELD("Algoritmo", R.drawable.ic_eye),
-    OPTIMIZE("Optimizar", R.drawable.ic_tune),
-    APPS("Apps", R.drawable.ic_apps),
+    NET("Red", R.drawable.ic_net),
+    MORE("Más", R.drawable.ic_tune),
 }
 
 @Composable
 private fun EscudoApp() {
+    val ctx = LocalContext.current
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
     Scaffold(
         bottomBar = {
             NavigationBar {
@@ -94,11 +103,11 @@ private fun EscudoApp() {
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
             when (Tab.entries[tab]) {
-                Tab.HOME -> HomeScreen()
-                Tab.NET -> NetScreen()
+                Tab.ME -> YoScreen()
+                Tab.TIME -> TimeScreen()
                 Tab.SHIELD -> ShieldScreen()
-                Tab.OPTIMIZE -> OptimizeScreen()
-                Tab.APPS -> AuditScreen()
+                Tab.NET -> NetScreen()
+                Tab.MORE -> MoreScreen()
             }
         }
     }
@@ -112,8 +121,9 @@ fun rememberTicker(periodMs: Long = 1000): Long {
     return t
 }
 
+/** Interruptor del cortafuegos anti-rastreo (primera tarjeta de la pestaña Red). */
 @Composable
-private fun HomeScreen() {
+fun FirewallCard() {
     val ctx = LocalContext.current
     val prefs = remember { Prefs(ctx) }
     val running by VpnState.running.collectAsState()
@@ -124,18 +134,69 @@ private fun HomeScreen() {
         if (VpnService.prepare(ctx) == null) EscudoVpnService.start(ctx)
         else Toast.makeText(ctx, "Sin permiso de VPN no puedo filtrar", Toast.LENGTH_LONG).show()
     }
-    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
-
-    LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-    }
 
     fun startVpn() {
         val prep = VpnService.prepare(ctx)
         if (prep != null) vpnLauncher.launch(prep) else EscudoVpnService.start(ctx)
     }
+
+    Section(
+        "Cortafuegos anti-rastreo", status,
+        explain = "Cada vez que una app quiere conectarse a un servidor, primero pregunta su dirección (consulta DNS). " +
+            "Escudo responde a esas preguntas dentro del móvil: si el servidor es de rastreo o publicidad, contesta " +
+            "\"no existe\" y la conexión nunca se produce, así que tus datos no salen.\n\nAndroid lo muestra como una " +
+            "\"VPN\" (verás una llave 🔑), pero tu tráfico NO va a ningún servidor externo: solo pasan por Escudo las " +
+            "preguntas DNS; el resto va directo. Por eso no pierdes velocidad, y además ahorras datos y batería.",
+    ) {
+        SwitchRow(
+            "Bloquear rastreadores y publicidad",
+            "Filtra en el propio móvil. Tu tráfico no pasa por ningún servidor.",
+            running,
+        ) { on -> if (on) startVpn() else EscudoVpnService.stop(ctx) }
+        key(tick) {
+            Text(
+                "Esta sesión: ${VpnState.sessionBlocked} bloqueados de ${VpnState.sessionQueries} consultas · " +
+                    "Total histórico: ${prefs.totalBlocked}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            val top = VpnState.topOffenders()
+            if (top.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text("Apps que más intentan rastrearte:", style = MaterialTheme.typography.labelLarge)
+                top.forEach { (app, n) -> Text("• $app: $n intentos", style = MaterialTheme.typography.bodySmall) }
+            }
+        }
+    }
+}
+
+private val MORE_TABS = listOf("⚙️ Optimizar", "🔍 Apps", "ℹ️ Ajustes")
+
+/** Pestaña "Más": optimización del móvil, auditoría de apps y ajustes/ayuda. */
+@Composable
+private fun MoreScreen() {
+    var seg by rememberSaveable { mutableIntStateOf(0) }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+            MORE_TABS.forEachIndexed { i, l ->
+                FilterChip(selected = seg == i, onClick = { seg = i }, label = { Text(l) })
+                Spacer(Modifier.width(6.dp))
+            }
+        }
+        Box(Modifier.weight(1f)) {
+            when (seg) {
+                0 -> OptimizeScreen()
+                1 -> AuditScreen()
+                else -> SettingsScreen()
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsScreen() {
+    val ctx = LocalContext.current
+    val prefs = remember { Prefs(ctx) }
+    val tick = rememberTicker()
 
     LazyColumn(contentPadding = PaddingValues(vertical = 12.dp)) {
         item {
@@ -147,12 +208,13 @@ private fun HomeScreen() {
         item {
             Section(
                 "Cómo te protege Escudo",
-                "Tres capas que trabajan dentro de tu móvil",
+                "Cuatro capas que trabajan dentro de tu móvil",
             ) {
                 Text(
-                    "1. Red: corta las conexiones de rastreo y publicidad de todas las apps antes de que salgan del móvil.\n" +
-                        "2. Algoritmo: le quita datos a las redes sociales y te ayuda a usarlas cuando tú decides.\n" +
-                        "3. Optimizar: desactiva apps de fábrica, frena el segundo plano y acelera las animaciones.",
+                    "1. Yo y Tiempo: tus presupuestos por categoría, recordatorios en Reels, modo foco, retos, XP y rachas.\n" +
+                        "2. Algoritmo: le quita datos a las redes sociales para que su feed te enganche menos.\n" +
+                        "3. Red: corta las conexiones de rastreo y publicidad de todas las apps antes de que salgan del móvil.\n" +
+                        "4. Optimizar: desactiva apps de fábrica, frena el segundo plano y acelera las animaciones.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Explain(
@@ -163,35 +225,6 @@ private fun HomeScreen() {
                         "servidores, no tiene cuenta y no envía nada a nadie. Su código es público.",
                     label = "¿Por qué funciona?",
                 )
-            }
-        }
-        item {
-            Section(
-                "Cortafuegos anti-rastreo", status,
-                explain = "Cada vez que una app quiere conectarse a un servidor, primero pregunta su dirección (consulta DNS). " +
-                    "Escudo responde a esas preguntas dentro del móvil: si el servidor es de rastreo o publicidad, contesta " +
-                    "\"no existe\" y la conexión nunca se produce, así que tus datos no salen.\n\nAndroid lo muestra como una " +
-                    "\"VPN\" (verás una llave 🔑), pero tu tráfico NO va a ningún servidor externo: solo pasan por Escudo las " +
-                    "preguntas DNS; el resto va directo. Por eso no pierdes velocidad, y además ahorras datos y batería.",
-            ) {
-                SwitchRow(
-                    "Bloquear rastreadores y publicidad",
-                    "Filtra en el propio móvil. Tu tráfico no pasa por ningún servidor.",
-                    running,
-                ) { on -> if (on) startVpn() else EscudoVpnService.stop(ctx) }
-                key(tick) {
-                    Text(
-                        "Esta sesión: ${VpnState.sessionBlocked} bloqueados de ${VpnState.sessionQueries} consultas · " +
-                            "Total histórico: ${prefs.totalBlocked}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    val top = VpnState.topOffenders()
-                    if (top.isNotEmpty()) {
-                        Spacer(Modifier.height(8.dp))
-                        Text("Apps que más intentan rastrearte:", style = MaterialTheme.typography.labelLarge)
-                        top.forEach { (app, n) -> Text("• $app: $n intentos", style = MaterialTheme.typography.bodySmall) }
-                    }
-                }
             }
         }
         item {
@@ -232,7 +265,7 @@ private fun SystemTips() {
     Section(
         "Ajustes recomendados del móvil", "Un toque te lleva al sitio exacto",
         explain = "Hay ajustes que ninguna app puede cambiar por ti sin permisos especiales. Escudo te lleva directo a cada " +
-            "pantalla y te dice qué tocar. Los que necesitan Shizuku están en la pestaña Optimizar.",
+            "pantalla y te dice qué tocar. Los que necesitan Shizuku están en Más → Optimizar.",
     ) {
         Tip("VPN siempre activa", "Ajustes > VPN > Escudo (⚙) > activa \"VPN siempre activa\". Así nunca se queda sin protección.") {
             open(ctx, Intent(Settings.ACTION_VPN_SETTINGS))

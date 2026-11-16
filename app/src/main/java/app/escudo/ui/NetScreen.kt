@@ -71,6 +71,7 @@ fun NetScreen() {
     fun reload() = EscudoVpnService.reload(ctx)
 
     LazyColumn(contentPadding = PaddingValues(vertical = 12.dp)) {
+        item { FirewallCard() }
         item {
             Section(
                 "Listas de bloqueo", "Se guardan en el móvil y se actualizan solas cada 3 días",

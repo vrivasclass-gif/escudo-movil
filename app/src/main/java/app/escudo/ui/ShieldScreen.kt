@@ -55,9 +55,6 @@ fun ShieldScreen() {
     var enabled by remember { mutableStateOf(prefs.shieldEnabled) }
     var snooze by remember { mutableStateOf(prefs.shieldSnoozeUntil) }
     var rules by remember { mutableStateOf(prefs.feedRulesText) }
-    var pauses by remember { mutableStateOf(prefs.pauseApps) }
-    var limits by remember { mutableStateOf(prefs.dailyLimits) }
-    var picker by remember { mutableStateOf<String?>(null) } // "pause" | "limit"
     val tick = rememberTicker(5000)
 
     LazyColumn(contentPadding = PaddingValues(vertical = 12.dp)) {
@@ -95,40 +92,6 @@ fun ShieldScreen() {
         }
         item {
             Section(
-                "Pausa consciente", "Cuenta atrás antes de abrir estas apps",
-                explain = "Abrir Instagram suele ser un acto reflejo: desbloqueas y el pulgar va solo. Una pantalla de " +
-                    "10 segundos con la pregunta \"¿para qué?\" interrumpe ese reflejo y te da tiempo a decidir. " +
-                    "Si decides entrar, tienes 15 minutos sin más interrupciones. No bloquea nada.",
-            ) {
-                pauses.toSortedMap().forEach { (pkg, secs) ->
-                    StepperRow(appLabel(ctx, pkg), "$secs s",
-                        onMinus = { pauses = pauses + (pkg to (secs - 5).coerceAtLeast(5)); prefs.pauseApps = pauses },
-                        onPlus = { pauses = pauses + (pkg to (secs + 5).coerceAtMost(120)); prefs.pauseApps = pauses },
-                        onRemove = { pauses = pauses - pkg; prefs.pauseApps = pauses })
-                }
-                TextButton(onClick = { picker = "pause" }) { Text("Añadir apps") }
-            }
-        }
-        item {
-            Section(
-                "Límite diario", "Al llegar al límite la app se cierra hasta mañana",
-                explain = "Este sí cierra la app, pero solo cuando llegas al tiempo que TÚ has decidido de antemano, " +
-                    "con la cabeza fría. Es opcional: no hay ningún límite puesto por defecto.",
-            ) {
-                if (limits.isEmpty()) Text("Sin límites", style = MaterialTheme.typography.bodySmall)
-                limits.toSortedMap().forEach { (pkg, min) ->
-                    val used = prefs.usageToday(pkg) / 60_000
-                    StepperRow(appLabel(ctx, pkg), "$used / $min min",
-                        onMinus = { limits = limits + (pkg to (min - 15).coerceAtLeast(5)); prefs.dailyLimits = limits },
-                        onPlus = { limits = limits + (pkg to (min + 15).coerceAtMost(600)); prefs.dailyLimits = limits },
-                        onRemove = { limits = limits - pkg; prefs.dailyLimits = limits })
-                }
-                TextButton(onClick = { picker = "limit" }) { Text("Añadir apps") }
-            }
-        }
-        item { UsageSection() }
-        item {
-            Section(
                 "Reglas de feeds (avanzado)", "Qué pantallas se detectan y qué se hace en cada una",
                 explain = "Cada línea es: app | nombre interno de la pantalla | acción | nombre. Acciones: \"aviso\" (solo " +
                     "recuerda), \"atras\" (te saca de esa pantalla) o \"inicio\" (vuelve al escritorio). Si Instagram " +
@@ -147,23 +110,6 @@ fun ShieldScreen() {
                 }
             }
         }
-    }
-
-    picker?.let { kind ->
-        val current = if (kind == "pause") pauses.keys else limits.keys
-        AppPicker(
-            title = if (kind == "pause") "Pausa antes de abrir…" else "Limitar tiempo de…",
-            initial = current,
-            onDismiss = { picker = null },
-            onConfirm = { sel ->
-                if (kind == "pause") {
-                    pauses = sel.associateWith { pauses[it] ?: 10 }; prefs.pauseApps = pauses
-                } else {
-                    limits = sel.associateWith { limits[it] ?: 30 }; prefs.dailyLimits = limits
-                }
-                picker = null
-            },
-        )
     }
 }
 
@@ -201,6 +147,7 @@ private fun PlanSection(prefs: Prefs) {
         target.steps.forEachIndexed { i, step ->
             val key = "${target.pkg}:${step.id}"
             PlanStepRow(i + 1, step, key in done, onToggle = { on ->
+                if (on && key !in done) app.escudo.game.GameEngine.onPlanStep(ctx)
                 done = if (on) done + key else done - key; prefs.planDone = done
             }) {
                 when (step.action) {
@@ -217,9 +164,10 @@ private fun PlanSection(prefs: Prefs) {
                         Toast.makeText(
                             ctx,
                             if (app.escudo.vpn.VpnState.running.value) "Bloqueo activado en el cortafuegos"
-                            else "Bloqueo preparado: enciende el cortafuegos en Inicio para que funcione",
+                            else "Bloqueo preparado: enciende el cortafuegos en la pestaña Red para que funcione",
                             Toast.LENGTH_LONG,
                         ).show()
+                        if (key !in done) app.escudo.game.GameEngine.onPlanStep(ctx)
                         done = done + key; prefs.planDone = done
                     }
                     PlanAction.OPEN_APP -> ctx.packageManager.getLaunchIntentForPackage(pkg)?.let { open(ctx, it) }
@@ -227,6 +175,7 @@ private fun PlanSection(prefs: Prefs) {
                     PlanAction.FRICTION -> {
                         prefs.pauseApps = prefs.pauseApps + (pkg to (prefs.pauseApps[pkg] ?: 10))
                         Toast.makeText(ctx, "Pausa de 10 s añadida a ${target.label}", Toast.LENGTH_SHORT).show()
+                        if (key !in done) app.escudo.game.GameEngine.onPlanStep(ctx)
                         done = done + key; prefs.planDone = done
                     }
                     PlanAction.NONE -> {}
@@ -236,6 +185,7 @@ private fun PlanSection(prefs: Prefs) {
     }
     if (harden) HardeningDialog(pkg, target.label) {
         harden = false
+        if ("${target.pkg}:data" !in done) app.escudo.game.GameEngine.onPlanStep(ctx)
         done = done + "${target.pkg}:data"; prefs.planDone = done
     }
 }
@@ -268,7 +218,7 @@ private fun PlanStepRow(n: Int, step: PlanStep, checked: Boolean, onToggle: (Boo
 }
 
 @Composable
-private fun StepperRow(label: String, value: String, onMinus: () -> Unit, onPlus: () -> Unit, onRemove: () -> Unit) {
+internal fun StepperRow(label: String, value: String, onMinus: () -> Unit, onPlus: () -> Unit, onRemove: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         TextButton(onClick = onMinus) { Text("−") }
@@ -279,7 +229,7 @@ private fun StepperRow(label: String, value: String, onMinus: () -> Unit, onPlus
 }
 
 @Composable
-private fun UsageSection() {
+internal fun UsageSection() {
     val ctx = LocalContext.current
     var granted by remember { mutableStateOf(PrivacyAuditor.hasUsageAccess(ctx)) }
     var today by remember { mutableStateOf<List<UsageRow>>(emptyList()) }

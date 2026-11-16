@@ -1,6 +1,5 @@
 package app.escudo.ui
 
-import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,14 +20,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
 private val Teal = Color(0xFF0F8A7E)
@@ -36,12 +32,14 @@ private val Teal = Color(0xFF0F8A7E)
 @Composable
 fun EscudoTheme(content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
-    val ctx = LocalContext.current
-    val scheme = when {
-        Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-        dark -> darkColorScheme(primary = Color(0xFF5ED6C6), secondary = Color(0xFF9AD1C9))
-        else -> lightColorScheme(primary = Teal, secondary = Color(0xFF3D6B65))
-    }
+    // Paleta propia, vibrante (violeta + turquesa), igual en todos los móviles
+    val scheme = if (dark) darkColorScheme(
+        primary = Color(0xFFB9A3FF), onPrimary = Color(0xFF2A0F7A), secondary = Color(0xFF5ED6C6),
+        secondaryContainer = Color(0xFF3A2C6E), onSecondaryContainer = Color(0xFFE9E1FF), tertiary = Color(0xFFFF8FB1),
+    ) else lightColorScheme(
+        primary = Color(0xFF5B2EFF), onPrimary = Color.White, secondary = Teal,
+        secondaryContainer = Color(0xFFE9E1FF), onSecondaryContainer = Color(0xFF2A0F7A), tertiary = Color(0xFFE5487D),
+    )
     MaterialTheme(colorScheme = scheme, content = content)
 }
 
@@ -52,7 +50,7 @@ fun Section(
     explain: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+    Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), shape = RoundedCornerShape(22.dp)) {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             if (subtitle != null) {

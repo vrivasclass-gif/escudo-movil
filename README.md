@@ -5,6 +5,14 @@ Funciona **100 % en tu teléfono**: sin cuentas, sin servidores propios, sin pub
 
 ## Qué hace
 
+### 0. Tu tiempo, como un juego (pensado para adolescentes)
+Basado en psicología del cambio de hábitos: refuerzo positivo, autonomía y pasos pequeños. Sin vergüenza ni sermones.
+- **Pantalla "Yo"**: avatar, nivel, XP, racha 🔥 con comodines ❄️, reto del día, logros, semana comparada y tiempo recuperado.
+- **Tiempo por categorías** (vídeo corto, redes, juegos, vídeo, compras…): cada una con su presupuesto diario y su modo: *Contar*, *Avisar* o *Bloquear* (con un comodín de 5 min al día que cuesta XP). Cualquier app se puede mover de categoría.
+- **Recordatorios en Reels/Shorts/TikTok**: cada pocos minutos (tú eliges cuántos) te dice cuánto llevas y te pregunta si te está aportando. Salir da XP.
+- **Modo foco** de 15–60 min: las apps trampa se cierran solas mientras estudias o entrenas.
+- **Configuración inicial** de un minuto: nombre, avatar, para qué quieres el tiempo y presupuestos (Suave / Equilibrado / Intenso).
+
 ### 1. Cortafuegos anti-rastreo (VPN local)
 - Bloquea a nivel DNS los dominios de rastreo, publicidad, telemetría y malware de **todas las apps**, también las del fabricante.
 - Usa listas públicas de primer nivel (HaGeZi Pro, StevenBlack, telemetría de Samsung/Xiaomi/TikTok…) guardadas en el móvil y actualizadas solas cada 3 días.
@@ -18,8 +26,7 @@ Funciona **100 % en tu teléfono**: sin cuentas, sin servidores propios, sin pub
 La idea no es prohibirte las redes sociales, sino que dejen de ser tan eficaces controlando tu atención.
 - **Plan anti-algoritmo** paso a paso para Instagram, TikTok, YouTube, Facebook y X. Cada paso explica por qué funciona: quitarle datos del móvil, apagar notificaciones, cortar el rastreo de Meta en otras apps, usar el feed cronológico, reiniciar lo que sabe de ti…
 - **Avisos en vídeos cortos**: al entrar en Reels o Shorts te recuerda dónde estás, sin cerrarte la app (como mucho un aviso cada 3 minutos).
-- **Pausa consciente**: una cuenta atrás antes de abrir las apps que elijas.
-- **Límites diarios** opcionales y **panel de uso** diario y semanal.
+- **Pausa consciente**, **límites por app** y **panel de uso** (en la pestaña Tiempo).
 
 ### 3. Auditor de privacidad
 - Detecta más de 50 SDKs de rastreo y publicidad dentro de tus apps (AppsFlyer, Meta, AdMob, Adjust…) y los permisos sensibles que tienen concedidos.

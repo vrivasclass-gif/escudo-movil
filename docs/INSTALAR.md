@@ -13,24 +13,25 @@ Obtainium es una app libre que instala apps directamente desde GitHub y te avisa
 2. Descarga `Escudo-vX.Y.Z.apk` de la última versión y ábrelo para instalarlo.
 
 ## Primera configuración (5 minutos)
-1. **Inicio → Bloquear rastreadores**: acepta el permiso de VPN y el de notificaciones. Aparecerá una llave 🔑 en la barra de estado.
-2. **Red → Actualizar ahora**: descarga las listas completas (unos 5 MB). Después se actualizan solas.
-3. **Escudo anti-algoritmo**: Inicio → *Accesibilidad* → *Apps instaladas* → **Escudo anti-algoritmo** → activar.
-   - En Android 13 o superior puede salir **"Ajuste restringido"**. Solución: Inicio → *Info de la app* → menú **⋮** (arriba a la derecha) → **Permitir ajustes restringidos**, y vuelve a activarlo.
-4. **Escudo → Tu uso → Conceder acceso**: activa Escudo en "Acceso a datos de uso" para ver tu panel.
-5. En **Inicio → Ajustes recomendados**, haz al menos:
+La app tiene 5 pestañas: **Yo · Tiempo · Algoritmo · Red · Más**.
+1. Al abrirla por primera vez, sigue la **configuración inicial** (nombre, avatar, objetivo y presupuestos). Al final te pide:
+   - **Accesibilidad** → *Apps instaladas* → **Escudo** → activar. Sirve para contar tu tiempo, los recordatorios y el modo foco.
+   - En Android 13+ o Xiaomi puede salir **"Ajuste restringido"**: Ajustes → Apps → Escudo → menú **⋮** → **Permitir ajustes restringidos**, y vuelve a activarlo.
+   - **Acceso a datos de uso** → Escudo → permitir.
+2. **Tiempo**: ajusta el presupuesto y el modo (Contar / Avisar / Bloquear) de cada categoría, y si alguna app está mal clasificada, cámbiala de categoría.
+3. **Red → Bloquear rastreadores**: acepta el permiso de VPN. Aparecerá una llave 🔑 en la barra de estado. Después pulsa **Actualizar ahora** para descargar las listas completas.
+4. **Más → Ajustes**, haz al menos:
    - **VPN siempre activa** (así nunca se apaga la protección).
    - **Que Android no cierre Escudo** (quita la optimización de batería).
    - **Borrar el ID de publicidad**.
-
-6. **Algoritmo → Plan anti-algoritmo**: sigue los pasos para Instagram (o la app que quieras).
+5. **Algoritmo → Plan anti-algoritmo**: sigue los pasos para Instagram (o la app que quieras). Cada paso da XP.
 
 ## Optimizar con Shizuku (opcional, sin root)
 Shizuku es una app gratuita que da a Escudo permisos de "depuración" para desactivar bloatware, quitar permisos ocultos, acelerar animaciones y poner la pantalla en grises.
 1. Instala **Shizuku** desde Google Play o https://github.com/RikkaApps/Shizuku/releases
 2. Activa las **Opciones de desarrollador**: Ajustes → Información del teléfono → toca 7 veces "Número de compilación".
 3. Abre Shizuku → **Iniciar mediante depuración inalámbrica** y sigue sus pasos (emparejar con el código que aparece en Ajustes → Opciones de desarrollador → Depuración inalámbrica).
-4. En Escudo → **Optimizar** → **Dar permiso a Escudo** y después **Conceder con Shizuku** (permiso permanente).
+4. En Escudo → **Más → Optimizar** → **Dar permiso a Escudo** y después **Conceder con Shizuku** (permiso permanente).
 5. Tras reiniciar el móvil hay que volver a iniciar Shizuku, pero la escala de grises y las animaciones siguen funcionando sin él.
 
 ### Para los móviles Xiaomi, Huawei, Oppo, Realme, Vivo y Samsung

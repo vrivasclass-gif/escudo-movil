@@ -2,6 +2,9 @@ package app.escudo.optimize
 
 import android.Manifest
 import android.content.Context
+import app.escudo.core.ShellErrors
+import android.os.Build
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.provider.Settings
 import app.escudo.data.Prefs
@@ -186,24 +189,74 @@ object Optimizer {
 
     // ------------------------------------------------------------------ apps de fábrica
 
+    // MATCH_UNINSTALLED_PACKAGES: también encuentra las apps quitadas solo para este usuario
+    @Suppress("DEPRECATION")
+    private val ANY_STATE = PackageManager.MATCH_DISABLED_COMPONENTS or PackageManager.MATCH_UNINSTALLED_PACKAGES
+
     fun isInstalled(ctx: Context, pkg: String) = try {
-        ctx.packageManager.getApplicationInfo(pkg, PackageManager.MATCH_DISABLED_COMPONENTS); true
+        ctx.packageManager.getApplicationInfo(pkg, ANY_STATE); true
     } catch (_: Exception) { false }
 
+    /** Activa = instalada para este usuario y no desactivada. */
     fun isEnabled(ctx: Context, pkg: String) = try {
-        ctx.packageManager.getApplicationInfo(pkg, PackageManager.MATCH_DISABLED_COMPONENTS).enabled
+        val ai = ctx.packageManager.getApplicationInfo(pkg, ANY_STATE)
+        ai.enabled && (ai.flags and ApplicationInfo.FLAG_INSTALLED) != 0
     } catch (_: Exception) { false }
 
+    val isXiaomi get() = Build.MANUFACTURER.equals("Xiaomi", true) || Build.BRAND.lowercase() in setOf("xiaomi", "redmi", "poco")
+
+    /**
+     * Desactiva una app de fábrica. Primero la congela (pm disable-user); si el
+     * fabricante no lo permite (Xiaomi suele bloquearlo), la quita solo para tu
+     * usuario (pm uninstall -k --user 0), que también se puede deshacer porque la
+     * app sigue guardada en el sistema. Se comprueba el resultado real, no solo lo
+     * que responde el comando.
+     */
     fun disableApp(ctx: Context, pkg: String, label: String): Shell.Result {
-        val r = Shell.run("pm disable-user --user 0 $pkg")
-        if (r.ok) record(ctx, "Desactivada: $label", "pm enable $pkg")
-        return r
+        val a = Shell.run("pm disable-user --user 0 $pkg")
+        if (!isEnabled(ctx, pkg)) {
+            record(ctx, "Desactivada: $label", "pm enable --user 0 $pkg")
+            return Shell.Result(0, "$label desactivada")
+        }
+        val b = Shell.run("pm uninstall -k --user 0 $pkg")
+        if (!isEnabled(ctx, pkg)) {
+            record(ctx, "Quitada para tu usuario: $label", "cmd package install-existing --user 0 $pkg ; pm enable --user 0 $pkg")
+            return Shell.Result(0, "$label quitada (se puede recuperar desde el historial)")
+        }
+        val raw = listOf(a.out, b.out).filter { it.isNotBlank() }.joinToString("\n")
+        return Shell.Result(1, ShellErrors.explain(raw, isXiaomi) + "\n\nDetalle técnico:\n" + raw.take(600))
     }
 
     fun enableApp(ctx: Context, pkg: String): Shell.Result {
-        val r = Shell.run("pm enable $pkg")
-        if (r.ok) forget(ctx, "pm enable $pkg")
-        return r
+        Shell.run("cmd package install-existing --user 0 $pkg")
+        val r = Shell.run("pm enable --user 0 $pkg")
+        if (isEnabled(ctx, pkg)) {
+            val p = Prefs(ctx)
+            p.appliedActions = p.appliedActions.filterNot { it.second.contains(" $pkg") && (it.second.startsWith("pm enable") || it.second.startsWith("cmd package install-existing")) }
+            return Shell.Result(0, "Reactivada")
+        }
+        return Shell.Result(1, ShellErrors.explain(r.out, isXiaomi) + "\n\nDetalle técnico:\n" + r.out.take(600))
+    }
+
+    /** Diagnóstico para la tarjeta de Shizuku: qué usuario usa y si el móvil bloquea cambios. */
+    fun diagnose(ctx: Context): String {
+        val sb = StringBuilder()
+        val id = Shell.run("id")
+        if (!id.ok) return "❌ Shizuku no responde: ${id.out}\n\n" + ShellErrors.explain(id.out, isXiaomi)
+        sb.append(if (id.out.contains("uid=2000")) "✅ Shizuku funciona (modo depuración)\n" else if (id.out.contains("uid=0")) "✅ Shizuku funciona (modo root)\n" else "⚠️ Usuario inesperado: ${id.out.take(80)}\n")
+        sb.append("📱 ${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE}\n")
+        if (isXiaomi) {
+            val sec = Shell.run("getprop persist.security.adbinput").out.trim()
+            sb.append(
+                if (sec == "1") "✅ \"Depuración USB (ajustes de seguridad)\" activada\n"
+                else "❌ \"Depuración USB (ajustes de seguridad)\" desactivada. Sin ella Xiaomi no deja quitar apps ni permisos. " +
+                    "Actívala en Opciones de desarrollador (pide SIM y cuenta Xiaomi) y reinicia Shizuku.\n",
+            )
+        }
+        val found = BLOAT.count { isInstalled(ctx, it.pkg) }
+        val on = BLOAT.count { isEnabled(ctx, it.pkg) }
+        sb.append("🧹 Bloatware conocido: $found encontradas, ${found - on} ya quitadas")
+        return sb.toString()
     }
 
     // ------------------------------------------------------------------ privacidad por app

@@ -136,8 +136,11 @@ class DnsTest {
 class FeedRulesTest {
     @Test fun parsesDefaults() {
         val rules = FeedRules.parse(FeedRules.DEFAULT_TEXT)
-        assertTrue(rules.any { it.pkg == "com.instagram.android" && it.viewId == "clips_viewer" })
-        assertFalse(rules.any { it.pkg == "com.zhiliaoapp.musically" }) // comentada
+        assertTrue(rules.any { it.pkg == "com.instagram.android" && "clips_viewer" in it.fragments })
+        val yt = rules.first { it.pkg == "com.google.android.youtube" }
+        assertTrue("reel_player" in yt.fragments)
+        assertEquals(listOf("Shorts"), yt.selectedTabs)
+        assertTrue(rules.any { it.pkg == "com.zhiliaoapp.musically" && it.wholeApp })
         assertFalse(rules.any { it.viewId == "clips_tab" }) // botón siempre visible: causaba cierres
         assertTrue(rules.all { it.action == FeedAction.NOTICE }) // por defecto nunca se cierra nada
         val r = FeedRules.parse("com.zhiliaoapp.musically | * | inicio | TikTok").single()
@@ -165,5 +168,84 @@ class TrackerTest {
             "com.myapp.MainActivity",
         )).map { it.name }
         assertEquals(listOf("Google AdMob", "AppsFlyer"), found)
+    }
+}
+
+class CategoriesTest {
+    @Test fun categorize() {
+        assertEquals(AppCategory.SHORT_VIDEO, Categorizer.categorize("com.zhiliaoapp.musically", -1))
+        assertEquals(AppCategory.SOCIAL, Categorizer.categorize("com.instagram.android", -1))
+        assertEquals(AppCategory.GAMES, Categorizer.categorize("com.some.game", Categorizer.CAT_GAME))
+        assertEquals(AppCategory.OTHER, Categorizer.categorize("com.some.notes", 7))
+        // la elección del usuario manda
+        assertEquals(AppCategory.SHORT_VIDEO, Categorizer.categorize("com.instagram.android", -1, mapOf("com.instagram.android" to "short")))
+    }
+}
+
+class GameTest {
+    @Test fun levels() {
+        assertEquals(1, Game.levelFor(0).number)
+        assertEquals(1, Game.levelFor(99).number)
+        assertEquals(2, Game.levelFor(100).number)
+        assertEquals(3, Game.levelFor(300).number)
+        assertEquals(0.5f, Game.levelFor(200).progress(200), 0.001f)
+        assertEquals("Inmune al scroll", Game.levelFor(1_000_000).title) // el título máximo se mantiene
+        assertTrue(Game.avatarsFor(1).size == 2)
+    }
+
+    @Test fun streakWithFreezes() {
+        var s = Game.Streak(0, 0, 0)
+        repeat(7) { s = Game.updateStreak(s, true) }
+        assertEquals(7, s.days); assertEquals(1, s.freezes)
+        s = Game.updateStreak(s, false)           // usa comodín
+        assertEquals(7, s.days); assertEquals(0, s.freezes); assertTrue(s.usedFreeze)
+        s = Game.updateStreak(s, false)           // sin comodines: se reinicia
+        assertEquals(0, s.days); assertEquals(7, s.best)
+    }
+
+    @Test fun dayOkAndChallenges() {
+        val budgets = mapOf(AppCategory.SHORT_VIDEO to 30, AppCategory.SOCIAL to 60, AppCategory.GAMES to 0)
+        val good = Game.DayStats(mapOf(AppCategory.SHORT_VIDEO to 25, AppCategory.GAMES to 300))
+        val bad = Game.DayStats(mapOf(AppCategory.SHORT_VIDEO to 31))
+        assertTrue(Game.dayOk(good, budgets))   // juegos sin presupuesto no cuenta
+        assertFalse(Game.dayOk(bad, budgets))
+
+        val under = Game.challengeById("short20")!!
+        val s = Game.DayStats(mapOf(AppCategory.SHORT_VIDEO to 10))
+        assertFalse(Game.isDone(under, s, dayClosed = false)) // aún no se da por bueno
+        assertTrue(Game.isDone(under, s, dayClosed = true))
+        assertTrue(Game.isDone(Game.challengeById("exit3")!!, Game.DayStats(reelExits = 3), false))
+        assertFalse(Game.isDone(Game.challengeById("late12")!!, Game.DayStats(firstTrapMinute = 9 * 60), true))
+        assertTrue(Game.isDone(Game.challengeById("late12")!!, Game.DayStats(firstTrapMinute = -1), true))
+
+        val c1 = Game.pickChallenge("2026-11-16", setOf(AppCategory.SOCIAL), hasRules = true)
+        val c2 = Game.pickChallenge("2026-11-16", setOf(AppCategory.SOCIAL), hasRules = true)
+        assertEquals(c1, c2) // estable en el mismo día
+        assertTrue(c1.cat == null || c1.cat == AppCategory.SOCIAL)
+    }
+
+    @Test fun achievementsAndTexts() {
+        val got = Game.newAchievements(Game.Totals(reelExits = 1, bestStreak = 3), setOf("streak3"))
+        assertEquals(listOf("exit1"), got.map { it.id })
+        val t = Game.checkInText(0, 12, "Instagram", "")
+        assertTrue(t.contains("12 min") && t.contains("Instagram"))
+        assertTrue(Game.checkInText(3, 5, "TikTok", "").contains("tus cosas"))
+        assertTrue(Game.equivalent(130).contains("peli"))
+    }
+}
+
+class ShellErrorsTest {
+    @org.junit.Test
+    fun xiaomiSecuritySetting() {
+        val out = "Exception occurred while executing 'disable-user':\njava.lang.SecurityException: Shell cannot change component state for com.miui.analytics/null to 3"
+        org.junit.Assert.assertTrue(ShellErrors.explain(out, xiaomi = true).contains("Depuración USB (ajustes de seguridad)"))
+        org.junit.Assert.assertFalse(ShellErrors.explain(out, xiaomi = false).contains("Xiaomi"))
+    }
+
+    @org.junit.Test
+    fun otherErrors() {
+        org.junit.Assert.assertTrue(ShellErrors.explain("Failure [DELETE_FAILED_USER_RESTRICTED]", true).contains("Xiaomi"))
+        org.junit.Assert.assertTrue(ShellErrors.explain("Unknown package: x.y", false).contains("ya no está"))
+        org.junit.Assert.assertTrue(ShellErrors.explain("", false).contains("Reinicia Shizuku"))
     }
 }

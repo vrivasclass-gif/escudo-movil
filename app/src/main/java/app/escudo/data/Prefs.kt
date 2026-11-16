@@ -63,8 +63,8 @@ class Prefs(context: Context) {
     // ---------- Escudo anti-algoritmo ----------
     var feedRulesText: String
         // v2: las reglas de la 0.1 expulsaban y una de ellas (clips_tab) cerraba Instagram sin parar
-        get() = p.getString("feed_rules_v2", FeedRules.DEFAULT_TEXT) ?: FeedRules.DEFAULT_TEXT
-        set(v) = p.edit().putString("feed_rules_v2", v).apply()
+        get() = p.getString("feed_rules_v3", FeedRules.DEFAULT_TEXT) ?: FeedRules.DEFAULT_TEXT
+        set(v) = p.edit().putString("feed_rules_v3", v).apply()
 
     var shieldEnabled: Boolean
         get() = p.getBoolean("shield_on", true)
@@ -128,13 +128,21 @@ class Prefs(context: Context) {
     fun setAllowUntil(pkg: String, t: Long) = p.edit().putLong("allow_$pkg", t).apply()
 
     fun cleanupOldUsage() {
-        val today = LocalDate.now().toString()
+        // Se conservan hoy y ayer: el juego cierra el día anterior a partir de este uso
+        val keep = listOf(LocalDate.now().toString(), LocalDate.now().minusDays(1).toString())
         val e = p.edit()
-        p.all.keys.filter { it.startsWith("use_") && !it.startsWith("use_$today") }.forEach { e.remove(it) }
+        p.all.keys.filter { k -> k.startsWith("use_") && keep.none { k.startsWith("use_$it") } }.forEach { e.remove(it) }
         e.apply()
     }
 
     private fun usageKey(pkg: String) = "use_${LocalDate.now()}_$pkg"
+
+    /** Uso por app (ms) de un día concreto, "AAAA-MM-DD". */
+    fun usageForDay(date: String): Map<String, Long> {
+        val prefix = "use_${date}_"
+        return p.all.filterKeys { it.startsWith(prefix) }
+            .mapNotNull { (k, v) -> (v as? Long)?.let { k.removePrefix(prefix) to it } }.toMap()
+    }
 
     companion object {
         const val DEFAULT_PAUSES = "com.instagram.android=10\ncom.zhiliaoapp.musically=15\n" +
@@ -143,6 +151,11 @@ class Prefs(context: Context) {
         fun parseMap(s: String): Map<String, Int> = s.lineSequence().mapNotNull {
             val i = it.indexOf('=')
             if (i <= 0) null else it.substring(0, i).trim() to (it.substring(i + 1).trim().toIntOrNull() ?: return@mapNotNull null)
+        }.toMap()
+
+        fun parseStringMap(s: String): Map<String, String> = s.lineSequence().mapNotNull {
+            val i = it.indexOf('=')
+            if (i <= 0) null else it.substring(0, i).trim() to it.substring(i + 1).trim()
         }.toMap()
 
         fun formatMap(m: Map<String, Int>) = m.entries.joinToString("\n") { "${it.key}=${it.value}" }

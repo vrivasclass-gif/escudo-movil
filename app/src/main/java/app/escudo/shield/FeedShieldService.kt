@@ -16,6 +16,11 @@ import app.escudo.core.FeedRule
 import app.escudo.optimize.Optimizer
 import app.escudo.core.FeedRules
 import app.escudo.data.Prefs
+import app.escudo.core.AppCategory
+import app.escudo.core.BudgetMode
+import app.escudo.core.Game
+import app.escudo.game.GameEngine
+import app.escudo.game.GameStore
 
 /**
  * Escudo anti-algoritmo.
@@ -40,38 +45,74 @@ class FeedShieldService : AccessibilityService() {
     private var lastAction = 0L
     private val lastNotice = HashMap<String, Long>()
 
+    // Estado de la sesión actual en primer plano (para recordatorios y presupuestos)
+    private lateinit var game: GameStore
+    private lateinit var overlay: Overlay
+    private var shortSince = 0L            // desde cuándo estás en vídeo corto en esta sesión (0 = no)
+    private var lastShortSeen = 0L         // última vez que vimos un feed de vídeo corto en pantalla
+    private var shortLabel = ""            // "Reels de Instagram", "Shorts de YouTube", "TikTok"…
+    private var shortPkg: String? = null   // app donde vimos el feed
+    private var nextCheckInMin = 0
+    private var checkInCount = 0
+    private val lastOverWarn = HashMap<AppCategory, Long>()
+    private val labels = HashMap<String, String>()
+
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
-                Intent.ACTION_SCREEN_OFF -> { flushUsage(); screenOn = false }
+                Intent.ACTION_SCREEN_OFF -> { flushUsage(); screenOn = false; endShort(); overlay.dismiss() }
                 Intent.ACTION_SCREEN_ON -> { screenOn = true; foregroundSince = SystemClock.elapsedRealtime() }
             }
         }
     }
 
-    /** Revisa cada 30 s si la app en primer plano ha superado su límite. */
+    /** Cada 15 s: tiempo de uso, límites, presupuestos, recordatorios, modo foco y cierre del día. */
     private val limitTick = object : Runnable {
         override fun run() {
-            flushUsage()
-            foregroundPkg?.let { enforceLimit(it) }
-            Optimizer.applyGraySchedule(this@FeedShieldService)
-            main.postDelayed(this, 30_000)
+            val ctx = this@FeedShieldService
+            // Cada paso por separado: si uno falla, los recordatorios siguen funcionando
+            step("uso") { flushUsage() }
+            step("cierre del día") {
+                if (game.lastDay != java.time.LocalDate.now().toString()) { GameEngine.rollover(ctx); prefs.cleanupOldUsage() }
+            }
+            step("foco") { GameEngine.checkFocus(ctx) }
+            step("recordatorio") {
+                val now = SystemClock.elapsedRealtime()
+                // Si llevas un rato sin ver ningún feed de vídeo corto, la sesión de scroll termina.
+                // Dentro de la misma app damos más margen: hay vídeos que no generan eventos mientras se reproducen.
+                val grace = if (foregroundPkg == shortPkg) SHORT_GRACE_SAME_APP else SHORT_GRACE
+                if (shortSince != 0L && now - lastShortSeen > grace) endShort()
+                foregroundPkg?.let { pkg ->
+                    if (screenOn && !enforceLimit(pkg) && !enforceBudget(pkg)) checkIn(pkg)
+                }
+            }
+            step("grises") { Optimizer.applyGraySchedule(ctx) }
+            publishState()
+            main.postDelayed(this, TICK_MS)
         }
     }
 
     override fun onServiceConnected() {
         prefs = Prefs(this)
-        prefs.cleanupOldUsage()
+        game = GameStore(this)
+        overlay = Overlay(this)
+        step("inicio") {
+            GameEngine.rollover(this) // cierra el día anterior antes de borrar su uso
+            prefs.cleanupOldUsage()
+        }
         registerReceiver(screenReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON)
         })
-        main.postDelayed(limitTick, 30_000)
+        main.postDelayed(limitTick, TICK_MS)
         ShieldState.connected = true
+        ShieldState.instance = this
     }
 
     override fun onDestroy() {
         ShieldState.connected = false
+        ShieldState.instance = null
         main.removeCallbacksAndMessages(null)
+        if (::overlay.isInitialized) overlay.dismiss()
         try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
         super.onDestroy()
     }
@@ -79,27 +120,41 @@ class FeedShieldService : AccessibilityService() {
     override fun onInterrupt() {}
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
+        // Un fallo aquí haría que Android apagara el servicio: lo apuntamos y seguimos
+        try { handleEvent(event) } catch (t: Throwable) {
+            ShieldState.lastError = "evento: ${t.javaClass.simpleName} ${t.message ?: ""}".take(200)
+        }
+    }
+
+    private fun handleEvent(event: AccessibilityEvent) {
+        if (!::game.isInitialized) return
         val pkg = event.packageName?.toString() ?: return
         if (pkg == packageName || pkg in IGNORED_PKGS) return
 
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != foregroundPkg) {
             onAppChanged(pkg)
         }
-        if (!prefs.shieldEnabled || System.currentTimeMillis() < prefs.shieldSnoozeUntil) return
+        val now = SystemClock.elapsedRealtime()
+
+        // Apps que son vídeo corto de principio a fin (TikTok…), según su categoría
+        if (GameEngine.categoryOf(this, pkg) == AppCategory.SHORT_VIDEO) markShort(label(pkg), now)
 
         val pkgRules = currentRules()[pkg] ?: return
-        val now = SystemClock.elapsedRealtime()
         if (now - lastAction < 1500) return
         // Recorrer el árbol de vistas cuesta: como mucho 2 veces por segundo
         if (now - lastScan < 500 && event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         lastScan = now
 
         val root = rootInActiveWindow ?: return
-        val hit = pkgRules.firstOrNull { it.wholeApp || containsViewId(root, it.viewId) } ?: return
+        if (root.packageName?.toString() != pkg) return
+        val hit = pkgRules.firstOrNull { it.wholeApp || matches(root, it) } ?: return
         lastAction = now
         when (hit.action) {
             FeedAction.NOTICE -> {
-                // Un recordatorio como mucho cada 3 minutos por feed: informar, no molestar
+                // Estás en vídeo corto: cuentan los recordatorios de tiempo (aunque los avisos estén apagados)
+                markShort(hit.label, now)
+                if (!prefs.shieldEnabled || System.currentTimeMillis() < prefs.shieldSnoozeUntil) return
+                // Un aviso al entrar (como mucho cada 3 min); después hablan los recordatorios
                 val key = hit.pkg + hit.label
                 if (now - (lastNotice[key] ?: -NOTICE_EVERY) < NOTICE_EVERY) return
                 lastNotice[key] = now
@@ -107,6 +162,7 @@ class FeedShieldService : AccessibilityService() {
                 toast(NOTICES[(prefs.feedsBlockedCount % NOTICES.size).toInt()].format(hit.label), long = true)
             }
             FeedAction.BACK, FeedAction.HOME -> {
+                if (!prefs.shieldEnabled || System.currentTimeMillis() < prefs.shieldSnoozeUntil) return
                 prefs.feedsBlockedCount = prefs.feedsBlockedCount + 1
                 performGlobalAction(if (hit.action == FeedAction.HOME) GLOBAL_ACTION_HOME else GLOBAL_ACTION_BACK)
                 toast("Escudo: has salido de ${hit.label}")
@@ -114,11 +170,53 @@ class FeedShieldService : AccessibilityService() {
         }
     }
 
+    private fun markShort(label: String, now: Long) {
+        if (shortSince == 0L) {
+            shortSince = now
+            nextCheckInMin = game.checkInMinutes
+        }
+        lastShortSeen = now
+        shortLabel = label
+        shortPkg = foregroundPkg
+    }
+
+    private fun endShort() { shortSince = 0; lastShortSeen = 0; shortPkg = null }
+
+    private fun step(name: String, block: () -> Unit) {
+        try { block() } catch (t: Throwable) { ShieldState.lastError = "$name: ${t.javaClass.simpleName} ${t.message ?: ""}".take(200) }
+    }
+
+    /** Copia el estado interno para que la app pueda enseñarlo en la prueba en vivo. */
+    private fun publishState() {
+        ShieldState.lastTick = System.currentTimeMillis()
+        ShieldState.foreground = foregroundPkg?.let { label(it) } ?: ""
+        ShieldState.shortLabel = if (shortSince != 0L) shortLabel else ""
+        ShieldState.shortMinutes = if (shortSince != 0L) ((SystemClock.elapsedRealtime() - shortSince) / 60_000).toInt() else 0
+        ShieldState.nextCheckIn = nextCheckInMin
+    }
+
+    /** Muestra una tarjeta de prueba ahora mismo (botón de la pestaña Tiempo). */
+    fun testOverlay() {
+        overlay.show(
+            "✅ Así se ven los recordatorios",
+            "Si ves esta tarjeta, Escudo puede mostrarte avisos encima de cualquier app.",
+            listOf(Overlay.Action("Genial", primary = true) {}),
+        )
+    }
+
     private fun onAppChanged(pkg: String) {
         flushUsage()
         foregroundPkg = pkg
         foregroundSince = SystemClock.elapsedRealtime()
+        // Al volver al escritorio la tarjeta se queda (normalmente la acabamos de mostrar al sacarte)
+        if (!isLauncher(pkg)) overlay.dismiss()
+        val cat = GameEngine.categoryOf(this, pkg)
+        if (cat.trap) {
+            GameEngine.onTrapOpened(this)
+            if (game.focusActive) { focusBlock(); return }
+        }
         if (enforceLimit(pkg)) return
+        if (enforceBudget(pkg)) return
 
         val pauseSecs = prefs.pauseApps[pkg] ?: return
         if (System.currentTimeMillis() < prefs.allowUntil(pkg)) return
@@ -139,6 +237,111 @@ class FeedShieldService : AccessibilityService() {
         return true
     }
 
+    private fun label(pkg: String) = labels.getOrPut(pkg) {
+        try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() } catch (_: Exception) { pkg }
+    }
+
+    private fun goHome() = performGlobalAction(GLOBAL_ACTION_HOME)
+
+    private val launchers: Set<String> by lazy {
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        @Suppress("DEPRECATION")
+        packageManager.queryIntentActivities(home, 0).map { it.activityInfo.packageName }.toSet()
+    }
+
+    private fun isLauncher(pkg: String) = pkg in launchers
+
+    private fun focusBlock() {
+        goHome()
+        val left = ((game.focusUntil - System.currentTimeMillis()) / 60_000 + 1).coerceAtLeast(1)
+        overlay.show(
+            "🎯 Modo foco: quedan $left min",
+            "Esta app es de tus apps trampa. Aguanta y ganas ${game.focusLength + Game.Xp.FOCUS_BONUS} XP.\n" +
+                "Idea: ${Game.ALTERNATIVES.random()}",
+            listOf(
+                Overlay.Action("Rendirme") { GameEngine.giveUpFocus(this) },
+                Overlay.Action("¡Aguanto! 💪", primary = true) {},
+            ),
+        )
+    }
+
+    /**
+     * Presupuesto diario por categoría. Devuelve true si ha cerrado la app.
+     * Modo "avisar": avisa al 80 % y al agotarlo (cada 10 min). Modo "bloquear": cierra al agotarlo.
+     */
+    private fun enforceBudget(pkg: String): Boolean {
+        val cat = GameEngine.categoryOf(this, pkg)
+        val budget = game.budget(cat)
+        val mode = game.mode(cat)
+        if (budget <= 0 || mode == BudgetMode.COUNT) return false
+        if (System.currentTimeMillis() < game.extraUntil(cat)) return false
+        val used = GameEngine.minutesOfPackages(this, cat)
+        val now = SystemClock.elapsedRealtime()
+
+        if (used >= budget) {
+            if (mode == BudgetMode.BLOCK) {
+                goHome()
+                val actions = mutableListOf(Overlay.Action("Vale 👍", primary = true) {})
+                if (!game.extraUsedToday(cat) && game.xp >= Game.Xp.EXTRA_TIME_COST) {
+                    actions.add(0, Overlay.Action("Comodín 5 min (−${Game.Xp.EXTRA_TIME_COST} XP)") {
+                        if (GameEngine.buyExtraTime(this, cat)) {
+                            packageManager.getLaunchIntentForPackage(pkg)?.let { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        }
+                    })
+                }
+                overlay.show(
+                    "🔒 ${cat.emoji} ${cat.label}: presupuesto agotado",
+                    "Has usado tus $budget min de hoy. Mañana se recarga.\nIdea: ${Game.ALTERNATIVES.random()}",
+                    actions,
+                )
+                return true
+            }
+            if (now - (lastOverWarn[cat] ?: -OVER_EVERY) >= OVER_EVERY && !overlay.showing) {
+                lastOverWarn[cat] = now
+                val streak = game.streak.days
+                overlay.show(
+                    "🚩 ${cat.emoji} Presupuesto de ${cat.label} gastado",
+                    "Llevas $used de $budget min hoy. " +
+                        (if (streak > 0) "Si sigues, hoy no sumará a tu racha 🔥$streak (salvo comodín ❄️). " else "") +
+                        "¿Lo dejas aquí?",
+                    listOf(
+                        Overlay.Action("Sigo") {},
+                        Overlay.Action("Salgo +${Game.Xp.BUDGET_EXIT} XP", primary = true) { goHome(); GameEngine.onBudgetExit(this, cat) },
+                    ),
+                )
+            }
+            return false
+        }
+        if (used * 10 >= budget * 8 && !game.warned("80_${cat.id}") && !overlay.showing) {
+            game.setWarned("80_${cat.id}")
+            overlay.show(
+                "⚠️ Te quedan ${budget - used} min de ${cat.label}",
+                "Ya has usado el 80 % de tu presupuesto de hoy. Úsalos en lo que más te importe.",
+                listOf(Overlay.Action("Entendido", primary = true) {}),
+            )
+        }
+        return false
+    }
+
+    /** Recordatorio cada pocos minutos mientras estás en vídeo corto. */
+    private fun checkIn(pkg: String) {
+        if (!game.checkInEnabled || shortSince == 0L || overlay.showing) return
+        val minutes = ((SystemClock.elapsedRealtime() - shortSince) / 60_000).toInt()
+        if (minutes < nextCheckInMin) return
+        nextCheckInMin = minutes + game.checkInMinutes
+        val app = shortLabel.ifBlank { label(pkg) }
+        overlay.show(
+            "⏱️ $minutes min en $app",
+            Game.checkInText(checkInCount++, minutes, app, game.goal),
+            listOf(
+                Overlay.Action("Me aporta, sigo") {},
+                Overlay.Action("Me salgo 💪 +${Game.Xp.REEL_EXIT} XP", primary = true) {
+                    goHome(); endShort(); GameEngine.onReelExit(this)
+                },
+            ),
+        )
+    }
+
     private fun flushUsage() {
         val pkg = foregroundPkg ?: return
         if (!screenOn) return
@@ -157,8 +360,18 @@ class FeedShieldService : AccessibilityService() {
         return rules
     }
 
-    /** Búsqueda en anchura del id de vista, limitada para no gastar batería. */
-    private fun containsViewId(root: AccessibilityNodeInfo, fragment: String): Boolean {
+    /**
+     * ¿Está en pantalla alguna de las vistas de la regla? Primero la búsqueda
+     * rápida de Android por id exacto; si no, un recorrido en anchura limitado
+     * que busca fragmentos de id y pestañas seleccionadas.
+     */
+    private fun matches(root: AccessibilityNodeInfo, rule: FeedRule): Boolean {
+        val frags = rule.fragments
+        val tabs = rule.selectedTabs
+        for (f in frags) {
+            val exact = try { root.findAccessibilityNodeInfosByViewId("${rule.pkg}:id/$f") } catch (_: Exception) { null }
+            if (exact?.any { it.isVisibleToUser } == true) return true
+        }
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
         var visited = 0
@@ -166,7 +379,11 @@ class FeedShieldService : AccessibilityService() {
             val n = queue.removeFirst()
             visited++
             val id = n.viewIdResourceName
-            if (id != null && id.contains(fragment) && n.isVisibleToUser) return true
+            if (id != null && n.isVisibleToUser && frags.any { id.contains(it) }) return true
+            if (tabs.isNotEmpty() && n.isSelected) {
+                val name = (n.contentDescription ?: n.text)?.toString()?.trim()
+                if (name != null && tabs.any { name.equals(it, true) }) return true
+            }
             for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
         }
         return false
@@ -176,8 +393,12 @@ class FeedShieldService : AccessibilityService() {
         main.post { Toast.makeText(this, msg, if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show() }
 
     companion object {
-        private const val MAX_NODES = 800
+        private const val MAX_NODES = 2500
+        private const val SHORT_GRACE = 60_000L
+        private const val SHORT_GRACE_SAME_APP = 4 * 60_000L
         private const val NOTICE_EVERY = 3 * 60_000L
+        private const val TICK_MS = 15_000L
+        private const val OVER_EVERY = 10 * 60_000L
 
         /** Recordatorios que explican qué está pasando, en lugar de cerrar la app. */
         private val NOTICES = listOf(
@@ -195,4 +416,12 @@ class FeedShieldService : AccessibilityService() {
 
 object ShieldState {
     @Volatile var connected = false
+    @Volatile var instance: FeedShieldService? = null
+    // Estado en vivo para la prueba de la pestaña Tiempo
+    @Volatile var lastTick = 0L
+    @Volatile var foreground = ""
+    @Volatile var shortLabel = ""
+    @Volatile var shortMinutes = 0
+    @Volatile var nextCheckIn = 0
+    @Volatile var lastError = ""
 }
